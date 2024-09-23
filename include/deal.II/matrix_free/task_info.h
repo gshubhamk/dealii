@@ -25,6 +25,9 @@
 #include <deal.II/base/tensor.h>
 #include <deal.II/base/vectorization.h>
 
+#include <deal.II/lac/dynamic_sparsity_pattern.h>               // edit by VD & SKG
+
+#include <deal.II/lac/la_parallel_vector.h>               // edit by VD & SKG
 
 DEAL_II_NAMESPACE_OPEN
 
@@ -49,6 +52,21 @@ namespace internal
     /// Starts the communication for the update ghost values operation
     virtual void
     vector_update_ghosts_start() = 0;
+										// edit by vd & skg starts
+    virtual void
+    src_ghost(std::vector<double>& ghost_vector, int nghost) = 0;
+  
+    virtual void
+    ghost_src(std::vector<double>& ghost_vector, int nghost)=0;
+
+    virtual void
+    dst_ghost(std::vector<double>& ghost_vector, int nghost)=0;
+
+    virtual void
+    ghost_dst(std::vector<double>& ghost_vector, int nghost)=0;
+
+    virtual void flame(int nghost)=0;
+									// edit by vd & skg ends
 
     /// Finishes the communication for the update ghost values operation
     virtual void
@@ -135,6 +153,10 @@ namespace internal
       void
       loop(MFWorkerInterface &worker) const;
 
+      //template <typename Number>
+      void
+      loop(MFWorkerInterface &worker, bool communication , int &indicator_part ) const;			// edit by vd & skg
+      
       /**
        * Make the number of cells which can only be treated in the
        * communication overlap divisible by the vectorization length.
