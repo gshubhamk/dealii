@@ -60,10 +60,10 @@ namespace Euler_DG
   using namespace dealii;
 
   // The same input parameters as in step-67:
-  constexpr unsigned int testcase             = 1;
+  constexpr unsigned int testcase             = 0;
   constexpr unsigned int dimension            = 2;
-  constexpr unsigned int n_global_refinements = 2;
-  constexpr unsigned int fe_degree            = 5;
+  constexpr unsigned int n_global_refinements = 3;
+  constexpr unsigned int fe_degree            = 2;
   constexpr unsigned int n_q_points_1d        = fe_degree + 2;
 
   // This parameter specifies the size of the shared-memory group. Currently,
@@ -85,10 +85,10 @@ namespace Euler_DG
 
   // The following parameters have not changed:
   constexpr double gamma       = 1.4;
-  constexpr double final_time  = testcase == 0 ? 10 : 2.0;
+  constexpr double final_time  = testcase == 0 ? 10 : 1.0;
   constexpr double output_tick = testcase == 0 ? 1 : 0.05;
 
-  const double courant_number = 0.15 / std::pow(fe_degree, 1.5);
+  const double courant_number = 0.1 / std::pow(fe_degree, 1.5);
 
   // Specify max number of time steps useful for performance studies.
   constexpr unsigned int max_time_steps = numbers::invalid_unsigned_int;
@@ -97,12 +97,13 @@ namespace Euler_DG
   // with the purpose to minimize global vector access:
   enum LowStorageRungeKuttaScheme
   {
+    stage_2_order_2,
     stage_3_order_3,
     stage_5_order_4,
     stage_7_order_4,
     stage_9_order_5,
   };
-  constexpr LowStorageRungeKuttaScheme lsrk_scheme = stage_5_order_4;
+  constexpr LowStorageRungeKuttaScheme lsrk_scheme = stage_3_order_3;
 
 
 
@@ -114,6 +115,9 @@ namespace Euler_DG
       TimeStepping::runge_kutta_method lsrk;
       switch (scheme)
         {
+			 case stage_2_order_2:
+	    		lsrk = TimeStepping::LOW_STORAGE_RK_STAGE2_ORDER2;
+	    		break;
           case stage_3_order_3:
             lsrk = TimeStepping::LOW_STORAGE_RK_STAGE3_ORDER3;
             break;
