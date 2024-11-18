@@ -842,7 +842,7 @@ public:
    */
   using tensor_type = Tensor<rank_, dim, Number>;
 
-private:
+public:
   /**
    * Array of tensors holding the elements of the tensor. If this is
    * a rank-1 tensor, then we simply need an array of scalars.
