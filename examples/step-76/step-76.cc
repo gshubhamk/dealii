@@ -103,7 +103,7 @@ namespace Euler_DG
   unsigned int face_part_1_start;
   int face_part_1_end;
 
-  int part_76 = 76;
+  int boundary_indicator = 0;   // 1 for Processor's boundary, initially set to zero always
 
   std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double, 8> >>>> flux_tensor;
   unsigned int stage = 0;
@@ -429,7 +429,7 @@ namespace Euler_DG
             {
           	  case 1:
                 {
-                  double k  = timestep_number+c_step_67[stage] - previous_flux_time_step[fe_degree];
+                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
 
                   double c1 = k+1;
                   double c2 = k;
@@ -438,7 +438,7 @@ namespace Euler_DG
                 }
               case 2:
                 {
-                  double k  = timestep_number+c_step_67[stage] - previous_flux_time_step[fe_degree];
+                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
                   double c1 = (k*k + 3*k + 2)/2;
                   double c2 = (-k*k-2*k);
                   double c3 = (k*k + k)/2;
@@ -449,7 +449,7 @@ namespace Euler_DG
 
               case 3:
                 {
-                  double k  = timestep_number+c_step_67[stage] - previous_flux_time_step[fe_degree];
+                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
                   double c1 = (k*k*k + 6*k*k + 11*k +6)/6;
                   double c2 = -1*(k*k*k + 5*k*k + 6*k)/2;
                   double c3 = (k*k*k + 4*k*k + 3*k)/2;
@@ -900,11 +900,12 @@ namespace Euler_DG
                     phi_p.reinit(cell, face);
                     phi_p.gather_evaluate(src, EvaluationFlags::values);
 
-                    if ( (part_76 ==1) && AT_flux_flag)
+                    // VD & SKG: Use AT flux if no communication
+                    if ( (boundary_indicator ==1) && AT_flux_flag)
                     {
                       face_index++;
                     }
-                    if((part_76 ==1) && (!communication) && AT_flux_flag)  // need to put communication is not happening flag can take it outside for loop
+                    if((boundary_indicator ==1) && (!communication) && AT_flux_flag)  // need to put communication is not happening flag can take it outside for loop
                     {
                       numerical_flux_type = AT_flux;
                     }
@@ -921,7 +922,7 @@ namespace Euler_DG
                           euler_numerical_flux<dim>(phi_m.get_value(q),
                                                     phi_p.get_value(q),
                                                     phi_m.normal_vector(q));
-                        if((part_76 ==1) && (stage==0) && communication && AT_flux_flag)
+                        if((boundary_indicator ==1) && (stage==0) && communication && AT_flux_flag)
                         {
                           flux_tensor[previous_flux_index][face_index][q] = numerical_flux;
                         }
@@ -1070,7 +1071,7 @@ namespace Euler_DG
       vec_ki,
       current_ri,
       true,
-      MatrixFree<dim, Number, VectorizedArrayType>::DataAccessOnFaces::values, part_76);    // edit by vd & skg
+      MatrixFree<dim, Number, VectorizedArrayType>::DataAccessOnFaces::values, boundary_indicator);    // edit by vd & skg
   }
 
 
@@ -1669,6 +1670,7 @@ namespace Euler_DG
           << std::endl
           << std::endl;
 
+    // VD & SKG
     if(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
     {
       if (AT_flux_flag)
@@ -1698,7 +1700,7 @@ namespace Euler_DG
 
     output_results(0);
     
-    if(AT_flux_flag)
+    if(AT_flux_flag)          // VD & SKG: skipping communication
     {
     while (time < final_time - 1e-12)
       {
