@@ -60,10 +60,10 @@ namespace Euler_DG
   using namespace dealii;
 
   // The same input parameters as in step-67:
-  constexpr unsigned int testcase             = 1;
+  constexpr unsigned int testcase             = 0;
   constexpr unsigned int dimension            = 2;
   constexpr unsigned int n_global_refinements = 2;
-  constexpr unsigned int fe_degree            = 5;
+  constexpr unsigned int fe_degree            = 2;
   constexpr unsigned int n_q_points_1d        = fe_degree + 2;
 
   // This parameter specifies the size of the shared-memory group. Currently,
@@ -85,15 +85,15 @@ namespace Euler_DG
 
   // The following parameters have not changed:
   constexpr double gamma       = 1.4;
-  constexpr double final_time  = testcase == 0 ? 10 : 2.0;
-  constexpr double output_tick = testcase == 0 ? 1 : 0.05;
+  constexpr double final_time  = testcase == 0 ? 10 : 1.0;
+  constexpr double output_tick = testcase == 0 ? 10 : 1.0;
 
-  double c = 0.01;
+  double c = 0.02;
   const double courant_number = c / std::pow(fe_degree, 1.5);     // edit by vd & skg
 
   //************************************* Changes for CAA: edit by vd & skg starts ****************************
   
-  int L = 3;
+  int L = 9;
   bool AT_flux_flag = true;
   bool communication = true;
 
@@ -141,7 +141,7 @@ namespace Euler_DG
     stage_7_order_4,
     stage_9_order_5,
   };
-  constexpr LowStorageRungeKuttaScheme lsrk_scheme = stage_5_order_4;
+  constexpr LowStorageRungeKuttaScheme lsrk_scheme = stage_3_order_3;
 
 
 
@@ -429,7 +429,7 @@ namespace Euler_DG
             {
           	  case 1:
                 {
-                  double k  = timestep_number+c_step_67[stage] - previous_flux_time_step[fe_degree];
+                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
 
                   double c1 = k+1;
                   double c2 = k;
@@ -438,7 +438,7 @@ namespace Euler_DG
                 }
               case 2:
                 {
-                  double k  = timestep_number+c_step_67[stage] - previous_flux_time_step[fe_degree];
+                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
                   double c1 = (k*k + 3*k + 2)/2;
                   double c2 = (-k*k-2*k);
                   double c3 = (k*k + k)/2;
@@ -449,7 +449,7 @@ namespace Euler_DG
 
               case 3:
                 {
-                  double k  = timestep_number+c_step_67[stage] - previous_flux_time_step[fe_degree];
+                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
                   double c1 = (k*k*k + 6*k*k + 11*k +6)/6;
                   double c2 = -1*(k*k*k + 5*k*k + 6*k)/2;
                   double c3 = (k*k*k + 4*k*k + 3*k)/2;
