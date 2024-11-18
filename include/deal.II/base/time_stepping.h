@@ -39,6 +39,7 @@ namespace TimeStepping
    *   - SSP_THIRD_ORDER (third order SSP Runge-Kutta)
    *   - RK_CLASSIC_FOURTH_ORDER (classical fourth order Runge-Kutta)
    * - Low-storage (explicit) Runge-Kutta methods
+   *   - LOW_STORAGE_RK_STAGE2_ORDER2 (Two stages and second order)
    *   - LOW_STORAGE_RK_STAGE3_ORDER3 (Three stages and third order)
    *   - LOW_STORAGE_RK_STAGE5_ORDER4 (Five stages and fourth order)
    *   - LOW_STORAGE_RK_STAGE7_ORDER4 (Seven stages and fourth order)
@@ -76,6 +77,10 @@ namespace TimeStepping
      * Classical fourth order Runge-Kutta method.
      */
     RK_CLASSIC_FOURTH_ORDER,
+    /**
+     * Two-stage scheme of order two        // edit by VD & SKG
+     */
+    LOW_STORAGE_RK_STAGE2_ORDER2,
     /**
      * Three-stage scheme of order three by Kennedy et al.
      * @cite KennedyCarpenterLewis2000. Its stability region is
