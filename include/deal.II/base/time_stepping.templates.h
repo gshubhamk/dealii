@@ -270,6 +270,19 @@ namespace TimeStepping
 
     switch (method)
       {
+        case (LOW_STORAGE_RK_STAGE2_ORDER2):        // edit by VD & SKG
+          {
+            this->n_stages = 2;
+            this->b.reserve(this->n_stages);
+            this->b.push_back(0.5);
+            this->b.push_back(0.5);
+            // this->b.push_back(0.569933660509768);
+
+            std::vector<double> tmp;
+            tmp = {{1.0}};
+            this->a.push_back(tmp);
+            break;
+          }
         case (LOW_STORAGE_RK_STAGE3_ORDER3):
           {
             this->n_stages = 3;
