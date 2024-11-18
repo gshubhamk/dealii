@@ -77,6 +77,10 @@ namespace TimeStepping
      */
     RK_CLASSIC_FOURTH_ORDER,
     /**
+     * Two-stage scheme of order two        // edit by vd & skg
+     */
+    LOW_STORAGE_RK_STAGE2_ORDER2,
+    /**
      * Three-stage scheme of order three by Kennedy et al.
      * @cite KennedyCarpenterLewis2000. Its stability region is
      * significantly smaller than the higher order schemes, but due to three
