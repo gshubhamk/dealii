@@ -94,9 +94,7 @@ namespace Euler_DG
   //************************************* Changes for CAA: edit by VD & SKG starts ****************************
   
   bool caa = false;
-  int L = 0;
-  if(caa)
-    L = 5;
+  int L = 0;  // L = 0 for no CAA; L > 0 for CAA
   bool AT_flux_flag = true;
   bool communication = true;
 
@@ -108,7 +106,7 @@ namespace Euler_DG
 
   int PE_boundary_indicator = 0;      // 1 for PE boundaries; initially set to zero
 
-  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double, 4> >>>> flux_tensor;
+  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double, 8> >>>> flux_tensor;
   unsigned int stage = 0;
 
   int previous_flux_index = 0;
