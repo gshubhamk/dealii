@@ -93,7 +93,10 @@ namespace Euler_DG
 
   //************************************* Changes for CAA: edit by VD & SKG starts ****************************
   
-  int L = 9;
+  bool caa = false;
+  int L = 0;
+  if(caa)
+    L = 5;
   bool AT_flux_flag = true;
   bool communication = true;
 
@@ -1718,6 +1721,8 @@ namespace Euler_DG
         else
         {
           communication = false;
+          if(!caa)
+            communication = true;
           this->euler_operator.data.communication = communication;
         }
         if (timestep_number % 50 == 0)
@@ -1760,6 +1765,8 @@ namespace Euler_DG
             else
               {
                 communication = false;
+                if(!caa)
+                  communication = true;
                 this->euler_operator.data.communication = communication;
               }
 
