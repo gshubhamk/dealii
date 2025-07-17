@@ -45,6 +45,8 @@
 #include <deal.II/matrix_free/type_traits.h>
 #include <deal.II/matrix_free/vector_data_exchange.h>
 
+#include <deal.II/base/timer.h>
+
 #include <deal.II/grid/grid_tools.h>        // edit by VD & SKG
 #include<vector>
 #include<iostream>
@@ -1614,7 +1616,8 @@ public:
     const bool              zero_dst_vector = false,
     const DataAccessOnFaces src_vector_face_access =
       DataAccessOnFaces::unspecified,
-    int                   &PE_boundary_indicator = 0) const;          // edit by VD & SKG
+    int                   &PE_boundary_indicator = 0,
+    dealii::TimerOutput &timer = nullptr) const;          // edit by VD & SKG
 
   /**
    * In the hp-adaptive case, a subrange of cells as computed during the cell
@@ -5642,6 +5645,7 @@ MatrixFree<dim, Number, VectorizedArrayType>::loop(
   const DataAccessOnFaces dst_vector_face_access,
   const DataAccessOnFaces src_vector_face_access) const
 {
+  // printf("loop function called-2\n");
   internal::MFWorker<MatrixFree<dim, Number, VectorizedArrayType>,
                      InVector,
                      OutVector,
@@ -6084,7 +6088,8 @@ MatrixFree<dim, Number, VectorizedArrayType>::loop_cell_centric_CAA(
   InVector &              src,
   const bool              zero_dst_vector,
   const DataAccessOnFaces src_vector_face_access,
-  int &PE_boundary_indicator) const
+  int &PE_boundary_indicator,
+  dealii::TimerOutput &timer) const // SKG-timer: add timer here
 {
   auto src_vector_face_access_temp = src_vector_face_access;
   if (DataAccessOnFaces::gradients == src_vector_face_access_temp)
@@ -6118,7 +6123,7 @@ MatrixFree<dim, Number, VectorizedArrayType>::loop_cell_centric_CAA(
   index_set = this->get_ghost_set();
   int number_elements = index_set.n_elements();
   
-  task_info.loop(worker, this->communication, PE_boundary_indicator);
+  task_info.loop(worker, this->communication, PE_boundary_indicator, timer);
 }
 
 //************************************ edit by VD & SKG ends ******************************************************

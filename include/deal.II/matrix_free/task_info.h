@@ -29,7 +29,7 @@
 
 #include <deal.II/lac/la_parallel_vector.h>               // edit by VD & SKG
 
-
+#include <deal.II/base/timer.h>
 DEAL_II_NAMESPACE_OPEN
 
 
@@ -157,7 +157,7 @@ namespace internal
 
       //template <typename Number>
       void
-      loop(MFWorkerInterface &worker, bool communication , int &PE_boundary_indicator ) const;			// edit by VD & SKG
+      loop(MFWorkerInterface &worker, bool communication , int &PE_boundary_indicator, dealii::TimerOutput &timer) const;			// edit by VD & SKG
 
       /**
        * Make the number of cells which can only be treated in the
