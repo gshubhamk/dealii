@@ -105,7 +105,7 @@ namespace Euler_DG
 
   int PE_boundary_indicator = 0;      // 1 for PE boundaries; initially set to zero
 
-  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double, 8> >>>> flux_tensor;
+  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double> >>>> flux_tensor;
   unsigned int stage = 0;
 
   int previous_flux_index = 0;
