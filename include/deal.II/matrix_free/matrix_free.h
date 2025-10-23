@@ -46,6 +46,11 @@
 #include <deal.II/matrix_free/type_traits.h>
 #include <deal.II/matrix_free/vector_data_exchange.h>
 
+#include <deal.II/grid/grid_tools.h>        // edit by VD & SKG
+#include<vector>
+#include<iostream>
+#include<fstream>
+
 #include <cstdlib>
 #include <limits>
 #include <list>
@@ -128,6 +133,11 @@ public:
    * The dimension set by the template argument `dim`.
    */
   static constexpr unsigned int dimension = dim;
+
+  // L represents the number of time steps. communication is skipped //edit by VD & SKG
+  int L = 1;
+  // if communication bool variable is true then communication happens 
+  bool communication = true;
 
   /**
    * Collects the options for initialization of the MatrixFree class. The
@@ -1574,6 +1584,24 @@ public:
       DataAccessOnFaces::unspecified) const;
 
   /**
+   * Same as above, but based on CAA. by VD & SKG
+   */
+  template <typename OutVector, typename InVector>
+  void
+  loop_cell_centric_CAA(
+    const std::function<void(const MatrixFree &,
+                             OutVector &,
+                             const InVector &,
+                             const std::pair<unsigned int, unsigned int> &)>
+                           &cell_operation,
+    OutVector              &dst,
+    InVector               &src,
+    const bool              zero_dst_vector = false,
+    const DataAccessOnFaces src_vector_face_access =
+      DataAccessOnFaces::unspecified,
+    int                   &PE_boundary_indicator = 0) const;          // edit by VD & SKG
+
+  /**
    * In the hp-adaptive case, a subrange of cells as computed during the cell
    * loop might contain elements of different degrees. Use this function to
    * compute what the subrange for an individual finite element degree is. The
@@ -2207,8 +2235,7 @@ public:
     const AlignedVector<Number> *memory) const;
 
   /** @} */
-
-private:
+public:                   /* VD & SKG: private to public */
   /**
    * This is the actual reinit function that sets up the indices for the
    * DoFHandler case.
@@ -4838,6 +4865,42 @@ namespace internal
         internal::update_ghost_values_start(src, src_data_exchanger);
     }
 
+    // ***  edit by VD & SKG starts
+    virtual void
+    src_ghost(std::vector<double>& ghost_vector, int nghost)override
+    {
+      printf("s ");
+      std::cout << "ghost_vector = " << ghost_vector[0] << " nghost = " << nghost << std::endl;
+    }
+
+    virtual void
+    ghost_src(std::vector<double>& ghost_vector, int nghost)override
+    {
+       printf("g ");
+       std::cout << "ghost_vector = " << ghost_vector[0] << " nghost = " << nghost << std::endl;
+    }
+
+    virtual void
+    dst_ghost(std::vector<double>& ghost_vector, int nghost)override
+    {
+      printf("d ");
+      std::cout << "ghost_vector = " << ghost_vector[0] << " nghost = " << nghost << std::endl;
+    }
+
+    virtual void
+    ghost_dst(std::vector<double>& ghost_vector, int nghost)override
+    {
+      printf("g d ");
+      std::cout << "ghost_vector = " << ghost_vector[0] << " nghost = " << nghost << std::endl;
+    }
+    
+    virtual void 
+    flame(int nghost) override
+    {
+      printf("compress operation check ");
+      std::cout << " nghost = " << nghost << std::endl;
+    }				//*** edit by VD & SKG ends
+
     // Finishes the communication for the update ghost values operation
     virtual void
     vector_update_ghosts_finish() override
@@ -4941,7 +5004,7 @@ namespace internal
         }
     }
 
-  private:
+  public:									// private to public: edit by VD & SKG
     const MF     &matrix_free;
     Container    &container;
     function_type cell_function;
@@ -4967,7 +5030,342 @@ namespace internal
     const unsigned int dof_handler_index_pre_post;
   };
 
+  //**************************************************** edit by VD & SKG starts *****************************************************
+  // A implementation class for the worker object that runs the various
+  // operations we want to perform during the matrix-free loop
+  template <typename MF,
+            typename InVector,
+            typename OutVector,
+            typename Container,
+            bool is_constant>
+  class MFWorker2 : public MFWorkerInterface
+  {
+  public:
+    // An alias to make the arguments further down more readable
+    using function_type = typename MatrixFreeFunctions::
+      InterfaceSelector<MF, InVector, OutVector, Container, is_constant>::
+        function_type;
 
+    // constructor, binds all the arguments to this class
+    MFWorker2(const MF &                           matrix_free,
+             InVector &                           src,               // edit by VD & SKG
+             OutVector &                          dst,
+             const bool                           zero_dst_vector_setting,
+             const Container &                    container,
+             function_type                        cell_function,
+             function_type                        face_function,
+             function_type                        boundary_function,
+             const typename MF::DataAccessOnFaces src_vector_face_access =
+               MF::DataAccessOnFaces::none,
+             const typename MF::DataAccessOnFaces dst_vector_face_access =
+               MF::DataAccessOnFaces::none,
+             const std::function<void(const unsigned int, const unsigned int)>
+               &operation_before_loop = {},
+             const std::function<void(const unsigned int, const unsigned int)>
+               &                operation_after_loop       = {},
+             const unsigned int dof_handler_index_pre_post = 0)
+      : matrix_free(matrix_free)
+      , container(const_cast<Container &>(container))
+      , cell_function(cell_function)
+      , face_function(face_function)
+      , boundary_function(boundary_function)
+      , src(src)
+      , dst(dst)
+      , src_data_exchanger(matrix_free,
+                           src_vector_face_access,
+                           n_components(src))
+      , dst_data_exchanger(matrix_free,
+                           dst_vector_face_access,
+                           n_components(dst))
+      , src_and_dst_are_same(PointerComparison::equal(&src, &dst))
+      , zero_dst_vector_setting(zero_dst_vector_setting &&
+                                !src_and_dst_are_same)
+      , operation_before_loop(operation_before_loop)
+      , operation_after_loop(operation_after_loop)
+      , dof_handler_index_pre_post(dof_handler_index_pre_post)
+    {}
+
+    // Runs the cell work. If no function is given, nothing is done
+    virtual void
+    cell(const std::pair<unsigned int, unsigned int> &cell_range) override
+    {
+      if (cell_function != nullptr && cell_range.second > cell_range.first)
+        for (unsigned int i = 0; i < matrix_free.n_active_fe_indices(); ++i)
+          {
+            const auto cell_subrange =
+              matrix_free.create_cell_subrange_hp_by_index(cell_range, i);
+
+            if (cell_subrange.second <= cell_subrange.first)
+              continue;
+
+            (container.*
+             cell_function)(matrix_free, this->dst, this->src, cell_subrange);
+          }
+    }
+
+    virtual void
+    cell(const unsigned int range_index) override
+    {
+      process_range(cell_function,
+                    matrix_free.get_task_info().cell_partition_data_hp_ptr,
+                    matrix_free.get_task_info().cell_partition_data_hp,
+                    range_index);
+    }
+
+    virtual void
+    face(const unsigned int range_index) override
+    {
+      // container.*
+      process_range(face_function,
+                    matrix_free.get_task_info().face_partition_data_hp_ptr,
+                    matrix_free.get_task_info().face_partition_data_hp,
+                    range_index);
+    }
+
+    virtual void
+    boundary(const unsigned int range_index) override
+    {
+      process_range(boundary_function,
+                    matrix_free.get_task_info().boundary_partition_data_hp_ptr,
+                    matrix_free.get_task_info().boundary_partition_data_hp,
+                    range_index);
+    }
+
+  private:
+    void
+    process_range(const function_type &            fu,
+                  const std::vector<unsigned int> &ptr,
+                  const std::vector<unsigned int> &data,
+                  const unsigned int               range_index)
+    {
+      if (fu == nullptr)
+        return;
+      for (unsigned int i = ptr[range_index]; i < ptr[range_index + 1]; ++i)
+        (container.*fu)(matrix_free,
+                        this->dst,
+                        this->src,
+                        std::make_pair(data[2 * i], data[2 * i + 1]));
+    }
+
+  public:
+    // Starts the communication for the update ghost values operation. We
+    // cannot call this update if ghost and destination are the same because
+    // that would introduce spurious entries in the destination (there is also
+    // the problem that reading from a vector that we also write to is usually
+    // not intended in case there is overlap, but this is up to the
+    // application code to decide and we cannot catch this case here).
+    virtual void
+    vector_update_ghosts_start() override
+    {
+      if (!src_and_dst_are_same)
+        internal::update_ghost_values_start(src, src_data_exchanger);
+    }
+    // ***    Update by VD 
+    virtual void
+    src_ghost(std::vector<double>& ghost_vector, int nghost)override
+    {
+      int ghost_index = 0;
+      int local_size = this->src.locally_owned_size();
+      ghost_vector.clear();
+      for(ghost_index=0;ghost_index<nghost;ghost_index++)
+      {
+          ghost_vector.push_back(this->src.local_element(ghost_index+local_size));
+      }
+    }
+
+    virtual void
+    ghost_src(std::vector<double>& ghost_vector, int nghost)override
+    {
+      int ghost_index = 0;
+      int local_size = this->src.locally_owned_size();
+
+      for(ghost_index=0;ghost_index<nghost;ghost_index++)
+      {
+        this->src.local_element(ghost_index+local_size) = ghost_vector[ghost_index];        // according to documentation it is fast as compare to opeator()
+      }
+    }
+
+        virtual void
+    dst_ghost(std::vector<double>& ghost_vector, int nghost)override
+    {
+      int ghost_index = 0;
+      int local_size = this->dst.locally_owned_size();
+      ghost_vector.clear();
+      for(ghost_index=0;ghost_index<nghost;ghost_index++)
+      {
+          ghost_vector.push_back(this->dst.local_element(ghost_index+local_size));
+      }
+    }
+
+    virtual void
+    ghost_dst(std::vector<double>& ghost_vector, int nghost)override
+    {
+      int ghost_index = 0;
+      int local_size = this->dst.locally_owned_size();
+
+      for(ghost_index=0;ghost_index<nghost;ghost_index++)
+      {
+        this->dst.local_element(ghost_index+local_size) = ghost_vector[ghost_index];        // according to documentation it is fast as compare to opeator()
+      }
+    }
+
+
+
+
+
+    virtual void 
+    flame(int nghost) override
+    {
+
+      //****************************************** Understanding compress operation **************************************//
+      static int compress_var = 0;
+      static std::vector<double> dst_copy;
+
+      //****************************************** copy a dst vector to dst_copy **************************************//
+      if(compress_var%2==0)
+      {
+        int index = 0;
+        int local_size = this->dst.locally_owned_size();
+        dst_copy.clear();
+        for(index=0;index<nghost+local_size;index++)
+        {
+            dst_copy.push_back(this->dst.local_element(index));
+        }
+        
+      }
+      else
+      {
+        int index = 0;
+        int local_size = this->dst.locally_owned_size();
+        for(index=0;index<nghost+local_size;index++)
+        {
+          this->dst.local_element(index) = dst_copy[index];
+        }
+      }
+      compress_var++;
+    }
+
+    // Finishes the communication for the update ghost values operation
+    virtual void
+    vector_update_ghosts_finish() override
+    {
+      if (!src_and_dst_are_same)
+        internal::update_ghost_values_finish(src, src_data_exchanger);
+    }
+
+    // Starts the communication for the vector compress operation
+    virtual void
+    vector_compress_start() override
+    {
+      
+      internal::compress_start(dst, dst_data_exchanger);
+    }
+
+    // Finishes the communication for the vector compress operation
+    virtual void
+    vector_compress_finish() override
+    {
+      internal::compress_finish(dst, dst_data_exchanger);
+      
+    
+      if (!src_and_dst_are_same)                                                        // update by VD & SKG
+        internal::reset_ghost_values(src, src_data_exchanger);
+    }
+
+    // Zeros the given input vector
+    virtual void
+    zero_dst_vector_range(const unsigned int range_index) override
+    {
+      if (zero_dst_vector_setting)
+        internal::zero_vector_region(range_index, dst, dst_data_exchanger);
+    }
+
+    virtual void
+    cell_loop_pre_range(const unsigned int range_index) override
+    {
+      if (operation_before_loop)
+        {
+          const internal::MatrixFreeFunctions::DoFInfo &dof_info =
+            matrix_free.get_dof_info(dof_handler_index_pre_post);
+          if (range_index == numbers::invalid_unsigned_int)
+            {
+              // Case with threaded loop -> currently no overlap implemented
+              dealii::parallel::apply_to_subranges(
+                0U,
+                dof_info.vector_partitioner->locally_owned_size(),
+                operation_before_loop,
+                internal::VectorImplementation::minimum_parallel_grain_size);
+            }
+          else
+            {
+              AssertIndexRange(range_index,
+                               dof_info.cell_loop_pre_list_index.size() - 1);
+              for (unsigned int id =
+                     dof_info.cell_loop_pre_list_index[range_index];
+                   id != dof_info.cell_loop_pre_list_index[range_index + 1];
+                   ++id)
+                operation_before_loop(dof_info.cell_loop_pre_list[id].first,
+                                      dof_info.cell_loop_pre_list[id].second);
+            }
+        }
+    }
+
+    virtual void
+    cell_loop_post_range(const unsigned int range_index) override
+    {
+      if (operation_after_loop)
+        {
+          const internal::MatrixFreeFunctions::DoFInfo &dof_info =
+            matrix_free.get_dof_info(dof_handler_index_pre_post);
+          if (range_index == numbers::invalid_unsigned_int)
+            {
+              // Case with threaded loop -> currently no overlap implemented
+              dealii::parallel::apply_to_subranges(
+                0U,
+                dof_info.vector_partitioner->locally_owned_size(),
+                operation_after_loop,
+                internal::VectorImplementation::minimum_parallel_grain_size);
+            }
+          else
+            {
+              AssertIndexRange(range_index,
+                               dof_info.cell_loop_post_list_index.size() - 1);
+              for (unsigned int id =
+                     dof_info.cell_loop_post_list_index[range_index];
+                   id != dof_info.cell_loop_post_list_index[range_index + 1];
+                   ++id)
+                operation_after_loop(dof_info.cell_loop_post_list[id].first,
+                                     dof_info.cell_loop_post_list[id].second);
+            }
+        }
+    }
+
+  public:
+    const MF &    matrix_free;
+    Container &   container;
+    function_type cell_function;
+    function_type face_function;
+    function_type boundary_function;
+
+    InVector &      src;                       // edit by VD & SKG 
+    OutVector &     dst;
+    VectorDataExchange<MF::dimension,
+                       typename MF::value_type,
+                       typename MF::vectorized_value_type>
+      src_data_exchanger;
+    VectorDataExchange<MF::dimension,
+                       typename MF::value_type,
+                       typename MF::vectorized_value_type>
+               dst_data_exchanger;
+    const bool src_and_dst_are_same;
+    const bool zero_dst_vector_setting;
+    const std::function<void(const unsigned int, const unsigned int)>
+      operation_before_loop;
+    const std::function<void(const unsigned int, const unsigned int)>
+                       operation_after_loop;
+    const unsigned int dof_handler_index_pre_post;
+  };
+//************************************ edit by VD & SKG ends ******************************************************
 
   /**
    * An internal class to convert three function pointers to the
@@ -5691,6 +6089,58 @@ MatrixFree<dim, Number, VectorizedArrayType>::loop_cell_centric(
   task_info.loop(worker);
 }
 
+//************************************ edit by VD & SKG starts ******************************************************
+template <int dim, typename Number, typename VectorizedArrayType>
+template <  typename OutVector, typename InVector>
+inline void
+MatrixFree<dim, Number, VectorizedArrayType>::loop_cell_centric_CAA(
+  const std::function<void(const MatrixFree<dim, Number, VectorizedArrayType> &,
+                           OutVector &,
+                           const InVector &,
+                           const std::pair<unsigned int, unsigned int> &)>
+    &                     cell_operation,
+  OutVector &             dst,
+  InVector &              src,
+  const bool              zero_dst_vector,
+  const DataAccessOnFaces src_vector_face_access,
+  int &PE_boundary_indicator) const
+{
+  auto src_vector_face_access_temp = src_vector_face_access;
+  if (DataAccessOnFaces::gradients == src_vector_face_access_temp)
+    src_vector_face_access_temp = DataAccessOnFaces::gradients_all_faces;
+  else if (DataAccessOnFaces::values == src_vector_face_access_temp)
+    src_vector_face_access_temp = DataAccessOnFaces::values_all_faces;
+
+  using Wrapper =
+    internal::MFClassWrapper<MatrixFree<dim, Number, VectorizedArrayType>,
+                             InVector,
+                             OutVector>;
+  Wrapper wrap(cell_operation, nullptr, nullptr);
+
+  internal::MFWorker2<MatrixFree<dim, Number, VectorizedArrayType>,
+                     InVector,
+                     OutVector,
+                     Wrapper,
+                     true>
+    worker(*this,
+           src,
+           dst,
+           zero_dst_vector,
+           wrap,
+           &Wrapper::cell_integrator,
+           &Wrapper::face_integrator,
+           &Wrapper::boundary_integrator,
+           src_vector_face_access_temp,
+           DataAccessOnFaces::none);
+
+  IndexSet index_set;
+  index_set = this->get_ghost_set();
+  int number_elements = index_set.n_elements();
+  
+  task_info.loop(worker, this->communication, PE_boundary_indicator);
+}
+
+//************************************ edit by VD & SKG ends ******************************************************
 
 #endif // ifndef DOXYGEN
 

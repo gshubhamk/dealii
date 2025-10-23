@@ -44,6 +44,7 @@ namespace TimeStepping
    * LowStorageRungeKutta::initialize):
    *   - FORWARD_EULER (first order)
    *   - HEUN_EULER (second order)
+   *   - LOW_STORAGE_RK_STAGE2_ORDER2 (Two stages and second order)
    *   - LOW_STORAGE_RK_STAGE3_ORDER3 (three stages and third order)
    *   - LOW_STORAGE_RK_STAGE5_ORDER4 (five stages and fourth order)
    *   - LOW_STORAGE_RK_STAGE7_ORDER4 (seven stages and fourth order)
@@ -89,6 +90,10 @@ namespace TimeStepping
      * Sixth order Runge-Kutta method.
      */
     RK_SIXTH_ORDER,
+    /**
+     * Two-stage scheme of order two        // edit by VD & SKG
+     */
+    LOW_STORAGE_RK_STAGE2_ORDER2,
     /**
      * Three-stage scheme of order three by Kennedy et al.
      * @cite KennedyCarpenterLewis2000. Its stability region is
