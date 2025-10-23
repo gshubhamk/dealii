@@ -654,7 +654,7 @@ namespace internal
   //********************* edit by VD & SKG starts ************************/
     //template <typename Number>
     void
-    TaskInfo ::loop(MFWorkerInterface  &funct, bool communication, int &indicator_part ) const
+    TaskInfo ::loop(MFWorkerInterface  &funct, bool communication, int &indicator_part, dealii::TimerOutput &timer ) const // SKG-timer: added timer reference
     {
       // If we use thread parallelism, we do not currently support to schedule
       // pieces of updates within the loop, so this index will collect all
@@ -670,7 +670,11 @@ namespace internal
 
       if(communication)                                  // edit by VD & SKG
       {
-        funct.vector_update_ghosts_start();
+        // SKG-timer: timer for vector_update_ghosts_start
+        {
+          TimerOutput::Scope t(timer, "vector_update_ghosts_start");
+          funct.vector_update_ghosts_start();
+        }
       }
 
 #if defined(DEAL_II_WITH_TBB) && !defined(DEAL_II_TBB_WITH_ONEAPI)
@@ -743,8 +747,15 @@ namespace internal
               // catch the case of empty partition list: we still need to call
               // the vector communication routines to clean up and initiate
               // things
-              funct.vector_update_ghosts_finish();
-              funct.vector_compress_start();
+              // SKG-timer
+              {
+                TimerOutput::Scope t(timer, "vector_update_ghosts_finish");
+                funct.vector_update_ghosts_finish();
+              }
+              {
+                TimerOutput::Scope t(timer, "vector_compress_start");
+                funct.vector_compress_start();
+              }
             }
           else // end of partition-partition, start of partition-color
             {
@@ -792,7 +803,7 @@ namespace internal
                           worker_index++;
                           worker[worker_index] =
                             new (worker[worker_index - 1]->allocate_child())
-                              color::Parri = solution + factor_ai * k_i and solution += factor_solution * k_ititionWork(funct,
+                              color::PartitionWork(funct,
                                                    slice_index,
                                                    *this,
                                                    false);
@@ -828,11 +839,10 @@ namespace internal
                           if (part < partition_row_index.size() - 2)
                             {
                               blocked_worker[part / 2] =
-                                      funct.vector_compress_start();
-new (worker[worker_index - 1]->allocate_child())
+                                  new (worker[worker_index - 1]->allocate_child())
                                   color::PartitionWork(funct,
                                                        slice_index,
-                                  t1 = timer.wall_time();                     *this,
+                                                      *this,
                                                        true);
                               slice_index++;
                               if (slice_index < partition_row_index[part + 1])
@@ -893,7 +903,10 @@ new (worker[worker_index - 1]->allocate_child())
               else
                 {
                   Assert(evens <= 1, ExcInternalError());
-                  funct.vector_update_ghosts_finish();
+                  {
+                    TimerOutput::Scope t(timer, "vector_update_ghosts_finish");
+                    funct.vector_update_ghosts_finish();
+                  }
 
                   for (unsigned int color = 0; color < partition_row_index[1];
                        ++color)
@@ -909,7 +922,10 @@ new (worker[worker_index - 1]->allocate_child())
                       root->destroy(*root);
                     }
 
-                  funct.vector_compress_start();
+                  {
+                    TimerOutput::Scope t(timer, "vector_compress_start");
+                    funct.vector_compress_start();
+                  }
                 }
             }
         }
@@ -922,6 +938,8 @@ new (worker[worker_index - 1]->allocate_child())
           for (unsigned int part = 0; part < partition_row_index.size() - 2;
                ++part)
             {
+              {
+                TimerOutput::Scope t(timer, "Serial_Computation_Part1");
 
               // funct.part_access_function(part);
               indicator_part = part;
@@ -930,7 +948,10 @@ new (worker[worker_index - 1]->allocate_child())
               {  
                   if(communication)                        // edit by VD & SKG
                   {
-                    funct.vector_update_ghosts_finish();
+                    {
+                      TimerOutput::Scope t2(timer, "vector_update_ghosts_finish");
+                      funct.vector_update_ghosts_finish();
+                    }
                   }
               }
 
@@ -958,11 +979,17 @@ new (worker[worker_index - 1]->allocate_child())
                 }
 
               if (part == 1)
-                funct.vector_compress_start();
+                {
+                  TimerOutput::Scope t2(timer, "vector_compress_start");
+                  funct.vector_compress_start();
+                }
             }
-              
+          } // End for "Serial_Computation_Part1" timer scope 
         }
-      funct.vector_compress_finish();
+      {
+        TimerOutput::Scope t(timer, "vector_compress_finish");
+        funct.vector_compress_finish();
+      }
 
       if (scheme != none)
         funct.cell_loop_post_range(numbers::invalid_unsigned_int);
