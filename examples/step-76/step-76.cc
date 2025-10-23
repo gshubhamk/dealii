@@ -70,7 +70,7 @@ namespace Euler_DG
   // only the values 1 and numbers::invalid_unsigned_int is possible, leading
   // to the options that the memory features can be turned off or all processes
   // having access to the same shared-memory domain are grouped together.
-  constexpr unsigned int group_size = numbers::invalid_unsigned_int;
+  constexpr unsigned int group_size = 1; //numbers::invalid_unsigned_int;
 
   using Number = double;
 
@@ -97,6 +97,7 @@ namespace Euler_DG
   // with the purpose to minimize global vector access:
   enum LowStorageRungeKuttaScheme
   {
+    stage_2_order_2,
     stage_3_order_3,
     stage_5_order_4,
     stage_7_order_4,
@@ -114,6 +115,9 @@ namespace Euler_DG
       TimeStepping::runge_kutta_method lsrk;
       switch (scheme)
         {
+          case stage_2_order_2:
+	          lsrk = TimeStepping::LOW_STORAGE_RK_STAGE2_ORDER2;
+	          break;
           case stage_3_order_3:
             lsrk = TimeStepping::LOW_STORAGE_RK_STAGE3_ORDER3;
             break;
