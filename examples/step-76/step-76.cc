@@ -85,7 +85,7 @@ namespace Euler_DG
 
   // The following parameters have not changed:
   constexpr double gamma       = 1.4;
-  constexpr double final_time  = testcase == 0 ? 10 : 2.0;
+  constexpr double final_time  = testcase == 0 ? 50 : 2.0;
   constexpr double output_tick = testcase == 0 ? 1 : 0.05;
 
   double c = 0.02;
@@ -93,7 +93,7 @@ namespace Euler_DG
 
   //************************************* Changes for CAA: edit by VD & SKG starts ****************************
   
-  int L = 9;
+  int L = 1;
   bool AT_flux_flag = true;
   bool communication = true;
 
@@ -716,7 +716,7 @@ namespace Euler_DG
       i.second->set_time(current_time);
     for (auto &i : subsonic_outflow_boundaries)
       i.second->set_time(current_time);
-
+	face_index = 0;
     // Run a cell-centric loop by calling MatrixFree::loop_cell_centric() and
     // providing a lambda containing the effects of the cell, face and
     // boundary-face integrals:
@@ -902,10 +902,6 @@ namespace Euler_DG
                     phi_p.gather_evaluate(src, EvaluationFlags::values);
 
                     // VD & SKG: condition for AT flux and no communication
-                    if ( (PE_boundary_indicator ==1) && AT_flux_flag)
-                    {
-                      face_index++;
-                    }
                     if((PE_boundary_indicator ==1) && (!communication) && AT_flux_flag)  // need to put communication is not happening flag can take it outside for loop
                     {
                       numerical_flux_type = AT_flux;
@@ -929,6 +925,8 @@ namespace Euler_DG
                         }
                         phi_m.submit_value(-numerical_flux, q);
                       }
+		    if ( (PE_boundary_indicator ==1) && AT_flux_flag)
+			face_index++;
                   }
                 else
                   {
@@ -1682,7 +1680,7 @@ namespace Euler_DG
     }
 
     //******************************************** VD & SKG: Number of faces in part 1 ***************************************
-    int number_of_faces = 6*triangulation.n_global_active_cells()/Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD);
+    int number_of_faces = GeometryInfo<dim>::faces_per_cell * triangulation.n_active_cells();
 
     //******************************************* VD & SKG: Order of accuracy ****************************************
     unsigned int order_of_accuracy = fe_degree+1;
