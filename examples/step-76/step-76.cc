@@ -105,7 +105,7 @@ namespace Euler_DG
 
   int PE_boundary_indicator = 0;      // 1 for PE boundaries; initially set to zero
 
-  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double, 4> >>>> flux_tensor;
+  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double, 8> >>>> flux_tensor;
   unsigned int stage = 0;
 
   int previous_flux_index = 0;
@@ -1689,10 +1689,10 @@ namespace Euler_DG
     number_of_stages = c_at.size();
     for (unsigned int i=0; i<order_of_accuracy; i++)
     {      
-        std::vector<std::vector<dealii::Tensor<1,dimension+2, dealii::VectorizedArray<double, 4> >>> faces_for_tensor;        
+        std::vector<std::vector<dealii::Tensor<1,dimension+2, dealii::VectorizedArray<double, 8> >>> faces_for_tensor;        
         for (int j=0; j<number_of_faces; j++) 
         {            
-            std::vector<dealii::Tensor<1,dimension+2, dealii::VectorizedArray<double, 4> >> nodes_for_tensor(Utilities::pow(n_q_points_1d, dim-1));   
+            std::vector<dealii::Tensor<1,dimension+2, dealii::VectorizedArray<double, 8> >> nodes_for_tensor(Utilities::pow(n_q_points_1d, dim-1));   
             faces_for_tensor.push_back(nodes_for_tensor);        
         }        
         flux_tensor.push_back(faces_for_tensor);    
