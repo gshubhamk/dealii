@@ -939,7 +939,7 @@ namespace internal
                ++part)
             {
               {
-                TimerOutput::Scope t(timer, "Serial_Computation_Part1");
+                TimerOutput::Scope t(timer, "Overall_Computation_Communication");   // SKG-timer
 
               // funct.part_access_function(part);
               indicator_part = part;
@@ -954,6 +954,9 @@ namespace internal
                     }
                   }
               }
+              const std::string timer_name = "Computation_Part" + std::to_string(part);
+              {
+                TimerOutput::Scope t_comp(timer, timer_name);
 
               for (unsigned int i = partition_row_index[part];
                    i < partition_row_index[part + 1];
@@ -977,6 +980,7 @@ namespace internal
                     }
                   funct.cell_loop_post_range(i);
                 }
+              } // --- END OF "Computation_PartX" SCOPE ---
 
               if (part == 1)
                 {
@@ -984,7 +988,7 @@ namespace internal
                   funct.vector_compress_start();
                 }
             }
-          } // End for "Serial_Computation_Part1" timer scope 
+          } // End for "Overall_Computation_Communication" timer scope 
         }
       {
         TimerOutput::Scope t(timer, "vector_compress_finish");
