@@ -156,6 +156,12 @@ namespace internal
       void
       loop(MFWorkerInterface &worker) const;
 
+      /**
+       * Runs the matrix-free loop with timer for sa
+       */
+      void
+      loop(MFWorkerInterface &worker, dealii::TimerOutput &timer) const;			// edit by VD & SKG // SKG-timer
+
       void
       loop(MFWorkerInterface &worker, bool communication , int &PE_boundary_indicator, dealii::TimerOutput &timer) const;			// edit by VD & SKG // SKG-timer
 

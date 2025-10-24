@@ -152,7 +152,8 @@ namespace Euler_DG
                            const double    time_step,
                            VectorType     &solution,
                            VectorType     &vec_ri,
-                           VectorType     &vec_ki) const
+                           VectorType     &vec_ki,
+                           dealii::TimerOutput &timer) const       /* SKG-timer */
     {
       vec_ki.swap(solution);
 
@@ -169,7 +170,7 @@ namespace Euler_DG
                                         ai[stage] * time_step),
                                      (stage % 2 == 0 ? vec_ki : vec_ri),
                                      (stage % 2 == 0 ? vec_ri : vec_ki),
-                                     solution);
+                                     solution, timer); //SKG-timer
 
           if (stage > 0)
             sum_previous_bi += bi[stage - 1];
@@ -460,7 +461,8 @@ namespace Euler_DG
                   const Number                                      ai,
                   const LinearAlgebra::distributed::Vector<Number> &current_ri,
                   LinearAlgebra::distributed::Vector<Number>       &vec_ki,
-                  LinearAlgebra::distributed::Vector<Number> &solution) const;
+                  LinearAlgebra::distributed::Vector<Number> &solution,
+                  dealii::TimerOutput &timer) const;                // SKG-timer: added timer
 
     void project(const Function<dim>                        &function,
                  LinearAlgebra::distributed::Vector<Number> &solution) const;
@@ -619,7 +621,8 @@ namespace Euler_DG
     const Number                                      ai,
     const LinearAlgebra::distributed::Vector<Number> &current_ri,
     LinearAlgebra::distributed::Vector<Number>       &vec_ki,
-    LinearAlgebra::distributed::Vector<Number>       &solution) const
+    LinearAlgebra::distributed::Vector<Number>       &solution,
+    dealii::TimerOutput &timer) const // SKG-timer: added timer
   {
     for (auto &i : inflow_boundaries)
       i.second->set_time(current_time);
@@ -629,7 +632,9 @@ namespace Euler_DG
     // Run a cell-centric loop by calling MatrixFree::loop_cell_centric() and
     // providing a lambda containing the effects of the cell, face and
     // boundary-face integrals:
-    data.template loop_cell_centric<LinearAlgebra::distributed::Vector<Number>,
+    {
+      TimerOutput::Scope t(timer, "loop_cell_centric"); // SKG-timer: added timer here
+    data.template loop_cell_centric_sa<LinearAlgebra::distributed::Vector<Number>,
                                     LinearAlgebra::distributed::Vector<Number>>(
       [&](const auto &data, auto &dst, const auto &src, const auto cell_range) {
         using FECellIntegral = FEEvaluation<dim,
@@ -960,7 +965,8 @@ namespace Euler_DG
       vec_ki,
       current_ri,
       true,
-      MatrixFree<dim, Number, VectorizedArrayType>::DataAccessOnFaces::values);
+      MatrixFree<dim, Number, VectorizedArrayType>::DataAccessOnFaces::values, timer);    // edit by VD & SKG // SKG-timer: pass timer her
+    }   // end of scope for SKG-timer
   }
 
 
@@ -1579,7 +1585,7 @@ namespace Euler_DG
                                        time_step,
                                        solution,
                                        rk_register_1,
-                                       rk_register_2);
+                                       rk_register_2, timer); //SKG-timer
         }
 
         time += time_step;

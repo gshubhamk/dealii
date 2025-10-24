@@ -651,6 +651,339 @@ namespace internal
           partition_row_index[partition_row_index.size() - 2]);
     }
 
+  //************************************* edit by SKG: for sa *************/
+  void
+    TaskInfo::loop(MFWorkerInterface &funct, dealii::TimerOutput &timer ) const // SKG-timer: added timer reference
+    {
+      // If we use thread parallelism, we do not currently support to schedule
+      // pieces of updates within the loop, so this index will collect all
+      // calls in that case and work like a single complete loop over all
+      // cells
+      if (scheme != none)
+        funct.cell_loop_pre_range(numbers::invalid_unsigned_int);
+      else
+        funct.cell_loop_pre_range(
+          partition_row_index[partition_row_index.size() - 2]);
+
+      // SKG-timer: timer for vector_update_ghosts_start
+        {
+          TimerOutput::Scope t(timer, "vector_update_ghosts_start");
+          funct.vector_update_ghosts_start();
+        }
+
+#if defined(DEAL_II_WITH_TBB) && !defined(DEAL_II_TBB_WITH_ONEAPI)
+
+      if (scheme != none)
+        {
+          funct.zero_dst_vector_range(numbers::invalid_unsigned_int);
+          if (scheme == partition_partition && evens > 0)
+            {
+              tbb::empty_task *root =
+                new (tbb::task::allocate_root()) tbb::empty_task;
+              root->set_ref_count(evens + 1);
+              std::vector<partition::PartitionWork *> worker(n_workers);
+              std::vector<partition::PartitionWork *> blocked_worker(
+                n_blocked_workers);
+              MPICommunication *worker_compr =
+                new (root->allocate_child()) MPICommunication(funct, true);
+              worker_compr->set_ref_count(1);
+              for (unsigned int j = 0; j < evens; ++j)
+                {
+                  if (j > 0)
+                    {
+                      worker[j] = new (root->allocate_child())
+                        partition::PartitionWork(funct, 2 * j, *this, false);
+                      worker[j]->set_ref_count(2);
+                      blocked_worker[j - 1]->dummy =
+                        new (worker[j]->allocate_child()) tbb::empty_task;
+                      tbb::task::spawn(*blocked_worker[j - 1]);
+                    }
+                  else
+                    {
+                      worker[j] = new (worker_compr->allocate_child())
+                        partition::PartitionWork(funct, 2 * j, *this, false);
+                      worker[j]->set_ref_count(2);
+                      MPICommunication *worker_dist =
+                        new (worker[j]->allocate_child())
+                          MPICommunication(funct, false);
+                      tbb::task::spawn(*worker_dist);
+                    }
+                  if (j < evens - 1)
+                    {
+                      blocked_worker[j] = new (worker[j]->allocate_child())
+                        partition::PartitionWork(funct, 2 * j + 1, *this, true);
+                    }
+                  else
+                    {
+                      if (odds == evens)
+                        {
+                          worker[evens] = new (worker[j]->allocate_child())
+                            partition::PartitionWork(funct,
+                                                     2 * j + 1,
+                                                     *this,
+                                                     false);
+                          tbb::task::spawn(*worker[evens]);
+                        }
+                      else
+                        {
+                          tbb::empty_task *child =
+                            new (worker[j]->allocate_child()) tbb::empty_task();
+                          tbb::task::spawn(*child);
+                        }
+                    }
+                }
+
+              root->wait_for_all();
+              root->destroy(*root);
+            }
+          else if (scheme == partition_partition)
+            {
+              // catch the case of empty partition list: we still need to call
+              // the vector communication routines to clean up and initiate
+              // things
+              // SKG-timer
+              {
+                TimerOutput::Scope t(timer, "vector_update_ghosts_finish");
+                funct.vector_update_ghosts_finish();
+              }
+              {
+                TimerOutput::Scope t(timer, "vector_compress_start");
+                funct.vector_compress_start();
+              }
+            }
+          else // end of partition-partition, start of partition-color
+            {
+              // check whether there is only one partition. if not, build up the
+              // tree of partitions
+              if (odds > 0)
+                {
+                  tbb::empty_task *root =
+                    new (tbb::task::allocate_root()) tbb::empty_task;
+                  root->set_ref_count(evens + 1);
+                  const unsigned int n_blocked_workers =
+                    odds - (odds + evens + 1) % 2;
+                  const unsigned int n_workers =
+                    cell_partition_data.size() - 1 - n_blocked_workers;
+                  std::vector<color::PartitionWork *> worker(n_workers);
+                  std::vector<color::PartitionWork *> blocked_worker(
+                    n_blocked_workers);
+                  unsigned int      worker_index = 0, slice_index = 0;
+                  int               spawn_index_child = -2;
+                  MPICommunication *worker_compr =
+                    new (root->allocate_child()) MPICommunication(funct, true);
+                  worker_compr->set_ref_count(1);
+                  for (unsigned int part = 0;
+                       part < partition_row_index.size() - 1;
+                       part++)
+                    {
+                      if (part == 0)
+                        worker[worker_index] =
+                          new (worker_compr->allocate_child())
+                            color::PartitionWork(funct,
+                                                 slice_index,
+                                                 *this,
+                                                 false);
+                      else
+                        worker[worker_index] = new (root->allocate_child())
+                          color::PartitionWork(funct,
+                                               slice_index,
+                                               *this,
+                                               false);
+                      ++slice_index;
+                      for (; slice_index < partition_row_index[part + 1];
+                           slice_index++)
+                        {
+                          worker[worker_index]->set_ref_count(1);
+                          ++worker_index;
+                          worker[worker_index] =
+                            new (worker[worker_index - 1]->allocate_child())
+                              color::PartitionWork(funct,
+                                                   slice_index,
+                                                   *this,
+                                                   false);
+                        }
+                      worker[worker_index]->set_ref_count(2);
+                      if (part > 0)
+                        {
+                          blocked_worker[(part - 1) / 2]->dummy =
+                            new (worker[worker_index]->allocate_child())
+                              tbb::empty_task;
+                          ++worker_index;
+                          if (spawn_index_child == -1)
+                            tbb::task::spawn(*blocked_worker[(part - 1) / 2]);
+                          else
+                            {
+                              Assert(spawn_index_child >= 0,
+                                     ExcInternalError());
+                              tbb::task::spawn(*worker[spawn_index_child]);
+                            }
+                          spawn_index_child = -2;
+                        }
+                      else
+                        {
+                          MPICommunication *worker_dist =
+                            new (worker[worker_index]->allocate_child())
+                              MPICommunication(funct, false);
+                          tbb::task::spawn(*worker_dist);
+                          ++worker_index;
+                        }
+                      part += 1;
+                      if (part < partition_row_index.size() - 1)
+                        {
+                          if (part < partition_row_index.size() - 2)
+                            {
+                              blocked_worker[part / 2] =
+                                new (worker[worker_index - 1]->allocate_child())
+                                  color::PartitionWork(funct,
+                                                       slice_index,
+                                                       *this,
+                                                       true);
+                              ++slice_index;
+                              if (slice_index < partition_row_index[part + 1])
+                                {
+                                  blocked_worker[part / 2]->set_ref_count(1);
+                                  worker[worker_index] = new (
+                                    blocked_worker[part / 2]->allocate_child())
+                                    color::PartitionWork(funct,
+                                                         slice_index,
+                                                         *this,
+                                                         false);
+                                  ++slice_index;
+                                }
+                              else
+                                {
+                                  spawn_index_child = -1;
+                                  continue;
+                                }
+                            }
+                          for (; slice_index < partition_row_index[part + 1];
+                               slice_index++)
+                            {
+                              if (slice_index > partition_row_index[part])
+                                {
+                                  worker[worker_index]->set_ref_count(1);
+                                  ++worker_index;
+                                }
+                              worker[worker_index] =
+                                new (worker[worker_index - 1]->allocate_child())
+                                  color::PartitionWork(funct,
+                                                       slice_index,
+                                                       *this,
+                                                       false);
+                            }
+                          spawn_index_child = worker_index;
+                          ++worker_index;
+                        }
+                      else
+                        {
+                          tbb::empty_task *final =
+                            new (worker[worker_index - 1]->allocate_child())
+                              tbb::empty_task;
+                          tbb::task::spawn(*final);
+                          spawn_index_child = worker_index - 1;
+                        }
+                    }
+                  if (evens == odds)
+                    {
+                      Assert(spawn_index_child >= 0, ExcInternalError());
+                      tbb::task::spawn(*worker[spawn_index_child]);
+                    }
+                  root->wait_for_all();
+                  root->destroy(*root);
+                }
+              // case when we only have one partition: this is the usual
+              // coloring scheme, and we just schedule a parallel for loop for
+              // each color
+              else
+                {
+                  Assert(evens <= 1, ExcInternalError());
+                  {
+                    TimerOutput::Scope t(timer, "vector_update_ghosts_finish");
+                    funct.vector_update_ghosts_finish();
+                  }
+
+                  for (unsigned int color = 0; color < partition_row_index[1];
+                       ++color)
+                    {
+                      tbb::empty_task *root =
+                        new (tbb::task::allocate_root()) tbb::empty_task;
+                      root->set_ref_count(2);
+                      color::PartitionWork *worker =
+                        new (root->allocate_child())
+                          color::PartitionWork(funct, color, *this, false);
+                      tbb::empty_task::spawn(*worker);
+                      root->wait_for_all();
+                      root->destroy(*root);
+                    }
+
+                  {
+                    TimerOutput::Scope t(timer, "vector_compress_start");
+                    funct.vector_compress_start();
+                  }
+                }
+            }
+        }
+      else
+#endif
+        // serial loop, go through up to three times and do the MPI transfer at
+        // the beginning/end of the second part
+        {
+          for (unsigned int part = 0; part < partition_row_index.size() - 2;
+               ++part)
+            {
+              {
+                TimerOutput::Scope t(timer, "Overall_Computation_Communication");
+              if (part == 1)
+                {
+                  {
+                    TimerOutput::Scope t2(timer, "vector_update_ghosts_finish");
+                    funct.vector_update_ghosts_finish();
+                  }
+                }
+
+              for (unsigned int i = partition_row_index[part];
+                   i < partition_row_index[part + 1];
+                   ++i)
+                {
+                  funct.cell_loop_pre_range(i);
+                  funct.zero_dst_vector_range(i);
+                  AssertIndexRange(i + 1, cell_partition_data.size());
+                  if (cell_partition_data[i + 1] > cell_partition_data[i])
+                    {
+                      funct.cell(i);
+                    }
+
+                  if (face_partition_data.empty() == false)
+                    {
+                      if (face_partition_data[i + 1] > face_partition_data[i])
+                        funct.face(i);
+                      if (boundary_partition_data[i + 1] >
+                          boundary_partition_data[i])
+                        funct.boundary(i);
+                    }
+                  funct.cell_loop_post_range(i);
+                }
+
+              if (part == 1)
+                {
+                  TimerOutput::Scope t2(timer, "vector_compress_start");
+                  funct.vector_compress_start();
+                }
+            }
+          } // End for "Overall_Computation_Communication" timer scope 
+        }
+      {
+        TimerOutput::Scope t(timer, "vector_compress_finish");
+        funct.vector_compress_finish();
+      }
+
+      if (scheme != none)
+        funct.cell_loop_post_range(numbers::invalid_unsigned_int);
+      else
+        funct.cell_loop_post_range(
+          partition_row_index[partition_row_index.size() - 2]);
+    }
+
   //********************* edit by VD & SKG starts ************************/
     //template <typename Number>
     void
