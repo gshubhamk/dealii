@@ -940,6 +940,9 @@ namespace internal
                     funct.vector_update_ghosts_finish();
                   }
                 }
+              const std::string timer_name = "Computation_Part" + std::to_string(part);
+              {
+                TimerOutput::Scope t_comp(timer, timer_name);
 
               for (unsigned int i = partition_row_index[part];
                    i < partition_row_index[part + 1];
@@ -963,6 +966,7 @@ namespace internal
                     }
                   funct.cell_loop_post_range(i);
                 }
+              } // --- END OF "Computation_PartX" SCOPE ---
 
               if (part == 1)
                 {
