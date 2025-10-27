@@ -53,7 +53,10 @@
 // A new include for categorizing of cells according to their boundary IDs:
 #include <deal.II/matrix_free/tools.h>
 
+#include <iomanip>
 
+#include <cmath>     // For std::sqrt and std::pow
+#include <numeric>   // For std::accumulate
 
 namespace Euler_DG
 {
@@ -61,9 +64,9 @@ namespace Euler_DG
 
   // The same input parameters as in step-67:
   constexpr unsigned int testcase             = 1;
-  constexpr unsigned int dimension            = 2;
+  constexpr unsigned int dimension            = 3;
   constexpr unsigned int n_global_refinements = 2;
-  constexpr unsigned int fe_degree            = 5;
+  constexpr unsigned int fe_degree            = 2;
   constexpr unsigned int n_q_points_1d        = fe_degree + 2;
 
   // This parameter specifies the size of the shared-memory group. Currently,
@@ -85,10 +88,10 @@ namespace Euler_DG
 
   // The following parameters have not changed:
   constexpr double gamma       = 1.4;
-  constexpr double final_time  = testcase == 0 ? 10 : 2.0;
+  constexpr double final_time  = testcase == 0 ? 10 : 0.1;
   constexpr double output_tick = testcase == 0 ? 1 : 0.05;
 
-  const double courant_number = 0.15 / std::pow(fe_degree, 1.5);
+  const double courant_number = 0.02 / std::pow(fe_degree, 1.5);
 
   // Specify max number of time steps useful for performance studies.
   constexpr unsigned int max_time_steps = numbers::invalid_unsigned_int;
@@ -103,7 +106,7 @@ namespace Euler_DG
     stage_7_order_4,
     stage_9_order_5,
   };
-  constexpr LowStorageRungeKuttaScheme lsrk_scheme = stage_5_order_4;
+  constexpr LowStorageRungeKuttaScheme lsrk_scheme = stage_3_order_3;
 
 
 
@@ -1413,6 +1416,153 @@ namespace Euler_DG
     triangulation.refine_global(n_global_refinements);
 
     dof_handler.distribute_dofs(fe);
+
+  // SKG: Added this code to print detailed cell counts and statistics
+  {
+    const unsigned int n_processes = Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD);
+    const unsigned int this_rank   = Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    const unsigned int root_rank   = 0;
+
+    // 1. Each process counts its local interior and boundary cells
+    unsigned int local_interior_cells = 0;
+    unsigned int local_boundary_cells = 0;
+    for (const auto &cell : dof_handler.active_cell_iterators())
+      {
+        if (cell->is_locally_owned())
+          {
+            bool is_boundary_cell = false;
+            if (cell->at_boundary()) { is_boundary_cell = true; }
+            else
+              {
+                for (unsigned int face_no = 0; face_no < GeometryInfo<dim>::faces_per_cell; ++face_no)
+                  {
+                    const auto neighbor = cell->neighbor(face_no);
+                    if (neighbor.state() == IteratorState::valid && neighbor->level() == cell->level())
+                      {
+                        if (neighbor->is_ghost())
+                          {
+                            is_boundary_cell = true;
+                            break;
+                          }
+                      }
+                  }
+              }
+            if (is_boundary_cell) { local_boundary_cells++; }
+            else { local_interior_cells++; }
+          }
+      }
+
+    // 2. All processes call gather for both counts
+    const std::vector<unsigned int> interior_counts =
+      Utilities::MPI::gather(MPI_COMM_WORLD, local_interior_cells, root_rank);
+    const std::vector<unsigned int> boundary_counts =
+      Utilities::MPI::gather(MPI_COMM_WORLD, local_boundary_cells, root_rank);
+
+    // 3. Rank 0 computes statistics and prints everything
+    if (this_rank == root_rank)
+      {
+        pcout << "--- Cell Distribution (Interior vs. Boundary) ---" << std::endl;
+
+        // Only print the detailed table if n_processes < 200 
+        if (n_processes < 200)
+          {
+            pcout << "  " << std::setw(6) << "Rank" << " | " << std::setw(10)
+                  << "Interior" << " | " << std::setw(10) << "Boundary" << " | "
+                  << std::setw(10) << "Total" << std::endl;
+            pcout << "  -------------------------------------------------" << std::endl;
+          }
+
+        // --- Loop to calculate stats (and maybe print per-process data) ---
+        // (Initialize min/max/total variables as before)
+        unsigned int min_int_cells = (n_processes > 0 && !interior_counts.empty()) ? interior_counts[0] : 0;
+        unsigned int max_int_cells = (n_processes > 0 && !interior_counts.empty()) ? interior_counts[0] : 0;
+        unsigned int min_int_rank  = 0;
+        unsigned int max_int_rank  = 0;
+        double       total_int_cells = 0;
+        unsigned int min_bnd_cells = (n_processes > 0 && !boundary_counts.empty()) ? boundary_counts[0] : 0;
+        unsigned int max_bnd_cells = (n_processes > 0 && !boundary_counts.empty()) ? boundary_counts[0] : 0;
+        unsigned int min_bnd_rank  = 0;
+        unsigned int max_bnd_rank  = 0;
+        double       total_bnd_cells = 0;
+        unsigned int min_tot_cells = min_int_cells + min_bnd_cells;
+        unsigned int max_tot_cells = max_int_cells + max_bnd_cells;
+        unsigned int min_tot_rank  = 0;
+        unsigned int max_tot_rank  = 0;
+        double       grand_total_cells = 0;
+
+        for (unsigned int i = 0; i < n_processes; ++i)
+          {
+            const unsigned int int_c = interior_counts[i];
+            const unsigned int bnd_c = boundary_counts[i];
+            const unsigned int tot_c = int_c + bnd_c;
+
+            // Only print the row if n_processes < 200
+            if (n_processes < 200)
+              {
+                 pcout << "  " << std::setw(6) << i << " | " << std::setw(10) << int_c
+                       << " | " << std::setw(10) << bnd_c << " | " << std::setw(10)
+                       << tot_c << std::endl;
+              }
+
+            // --- Update Stats (Always do this) ---
+            if (int_c < min_int_cells) { min_int_cells = int_c; min_int_rank = i; }
+            if (int_c > max_int_cells) { max_int_cells = int_c; max_int_rank = i; }
+            total_int_cells += int_c;
+            if (bnd_c < min_bnd_cells) { min_bnd_cells = bnd_c; min_bnd_rank = i; }
+            if (bnd_c > max_bnd_cells) { max_bnd_cells = bnd_c; max_bnd_rank = i; }
+            total_bnd_cells += bnd_c;
+            if (tot_c < min_tot_cells) { min_tot_cells = tot_c; min_tot_rank = i; }
+            if (tot_c > max_tot_cells) { max_tot_cells = tot_c; max_tot_rank = i; }
+            grand_total_cells += tot_c;
+          }
+
+        // Only print the footer line if n_processes < 200
+        if (n_processes < 200)
+          {
+             pcout << "  -------------------------------------------------" << std::endl;
+          }
+
+
+        // --- Calculate final statistics (mean, std dev) ---
+        const double mean_int_cells = (n_processes > 0) ? (total_int_cells / n_processes) : 0.0;
+        double       sum_sq_diff_int  = 0;
+        for (unsigned int i = 0; i < n_processes; ++i)
+          sum_sq_diff_int += std::pow(interior_counts[i] - mean_int_cells, 2);
+        const double std_dev_int = (n_processes > 0) ? std::sqrt(sum_sq_diff_int / n_processes) : 0.0;
+        const double mean_bnd_cells = (n_processes > 0) ? (total_bnd_cells / n_processes) : 0.0;
+        double       sum_sq_diff_bnd  = 0;
+        for (unsigned int i = 0; i < n_processes; ++i)
+          sum_sq_diff_bnd += std::pow(boundary_counts[i] - mean_bnd_cells, 2);
+        const double std_dev_bnd = (n_processes > 0) ? std::sqrt(sum_sq_diff_bnd / n_processes) : 0.0;
+        const double mean_tot_cells = (n_processes > 0) ? (grand_total_cells / n_processes) : 0.0;
+        double       sum_sq_diff_tot  = 0;
+        for (unsigned int i = 0; i < n_processes; ++i)
+          sum_sq_diff_tot += std::pow(interior_counts[i] + boundary_counts[i] - mean_tot_cells, 2);
+        const double std_dev_tot = (n_processes > 0) ? std::sqrt(sum_sq_diff_tot / n_processes) : 0.0;
+
+
+        // --- Print statistical summary ---
+        pcout << "\n  --- Statistical Summary ---" << std::endl;
+        pcout << "  Category        | Total       | Min (Rank)         | Max (Rank)         | Mean    | Std Dev " << std::endl;
+        pcout << "  ----------------|-------------|--------------------|--------------------|---------|---------" << std::endl;
+        pcout << "  Interior Cells  | " << std::setw(11) << static_cast<long long>(total_int_cells) << " | "
+              << std::setw(6) << min_int_cells << " (" << std::setw(4) << min_int_rank << ") | "
+              << std::setw(6) << max_int_cells << " (" << std::setw(4) << max_int_rank << ") | "
+              << std::setw(7) << std::fixed << std::setprecision(1) << mean_int_cells << " | "
+              << std::setw(7) << std::fixed << std::setprecision(1) << std_dev_int << std::endl;
+        pcout << "  Boundary Cells  | " << std::setw(11) << static_cast<long long>(total_bnd_cells) << " | "
+              << std::setw(6) << min_bnd_cells << " (" << std::setw(4) << min_bnd_rank << ") | "
+              << std::setw(6) << max_bnd_cells << " (" << std::setw(4) << max_bnd_rank << ") | "
+              << std::setw(7) << std::fixed << std::setprecision(1) << mean_bnd_cells << " | "
+              << std::setw(7) << std::fixed << std::setprecision(1) << std_dev_bnd << std::endl;
+        pcout << "  Total Cells     | " << std::setw(11) << static_cast<long long>(grand_total_cells) << " | "
+              << std::setw(6) << min_tot_cells << " (" << std::setw(4) << min_tot_rank << ") | "
+              << std::setw(6) << max_tot_cells << " (" << std::setw(4) << max_tot_rank << ") | "
+              << std::setw(7) << std::fixed << std::setprecision(1) << mean_tot_cells << " | "
+              << std::setw(7) << std::fixed << std::setprecision(1) << std_dev_tot << std::endl;
+        pcout << "----------------------------------------------------------------------------------" << std::endl;
+      }
+  } // SKG: end of the new code
 
     euler_operator.reinit(mapping, dof_handler);
     euler_operator.initialize_vector(solution);
