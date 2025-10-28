@@ -60,9 +60,9 @@ namespace Euler_DG
   using namespace dealii;
 
   // The same input parameters as in step-67:
-  constexpr unsigned int testcase             = 0;
-  constexpr unsigned int dimension            = 2;
-  constexpr unsigned int n_global_refinements = 2;
+  constexpr unsigned int testcase             = 1;
+  constexpr unsigned int dimension            = 3;
+  constexpr unsigned int n_global_refinements = 3;
   constexpr unsigned int fe_degree            = 2;
   constexpr unsigned int n_q_points_1d        = fe_degree + 2;
 
@@ -129,7 +129,7 @@ namespace Euler_DG
    //************************************* Changes for CAA: edit by VD & SKG ends ****************************
 
   // Specify max number of time steps useful for performance studies.
-  constexpr unsigned int max_time_steps = numbers::invalid_unsigned_int;
+  constexpr unsigned int max_time_steps = 1000; // numbers::invalid_unsigned_int;
 
   // Runge-Kutta-related functions copied from step-67 and slightly modified
   // with the purpose to minimize global vector access:
@@ -1852,13 +1852,14 @@ namespace Euler_DG
 
     output_results(0);
 
-    // unsigned int timestep_number = 0;      // VD & SKG: commented
-
+    //unsigned int timestep_number = 0;      // VD & SKG: commented
+		unsigned int time_step_counter = 0;
     if(AT_flux_flag)
     {
-    while (time < final_time - 1e-12)
+    while (time < final_time - 1e-12 && time_step_counter < max_time_steps)
       {
         ++timestep_number;
+				++time_step_counter;
         if((timestep_number%(order_of_accuracy+L)<(order_of_accuracy)))//|(timestep_number<((order_of_accuracy+L+1)))
         {
           communication = true;
@@ -1899,7 +1900,7 @@ namespace Euler_DG
 
     else
       {
-        while (time < final_time - 1e-12 )
+        while (time < final_time - 1e-12)
           {
             ++timestep_number;
 

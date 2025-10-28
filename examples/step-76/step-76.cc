@@ -65,7 +65,7 @@ namespace Euler_DG
   // The same input parameters as in step-67:
   constexpr unsigned int testcase             = 1;
   constexpr unsigned int dimension            = 3;
-  constexpr unsigned int n_global_refinements = 2;
+  constexpr unsigned int n_global_refinements = 3;
   constexpr unsigned int fe_degree            = 2;
   constexpr unsigned int n_q_points_1d        = fe_degree + 2;
 
@@ -88,13 +88,13 @@ namespace Euler_DG
 
   // The following parameters have not changed:
   constexpr double gamma       = 1.4;
-  constexpr double final_time  = testcase == 0 ? 10 : 0.1;
+  constexpr double final_time  = testcase == 0 ? 10 : 2.0;
   constexpr double output_tick = testcase == 0 ? 1 : 0.05;
 
   const double courant_number = 0.02 / std::pow(fe_degree, 1.5);
 
   // Specify max number of time steps useful for performance studies.
-  constexpr unsigned int max_time_steps = numbers::invalid_unsigned_int;
+  constexpr unsigned int max_time_steps = 1000; // numbers::invalid_unsigned_int;
 
   // Runge-Kutta-related functions copied from step-67 and slightly modified
   // with the purpose to minimize global vector access:
@@ -1722,7 +1722,7 @@ namespace Euler_DG
     while (time < final_time - 1e-12 && timestep_number < max_time_steps)
       {
         ++timestep_number;
-        if (timestep_number % 5 == 0)
+        if (timestep_number % 50 == 0)
           time_step =
             courant_number * integrator.n_stages() /
             Utilities::truncate_to_n_digits(

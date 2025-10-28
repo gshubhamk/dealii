@@ -1321,15 +1321,21 @@ namespace internal
 
               if (part == 1)
                 {
-                  TimerOutput::Scope t2(timer, "vector_compress_start");
-                  funct.vector_compress_start();
+									if (communication)
+										{
+                  		TimerOutput::Scope t2(timer, "vector_compress_start");
+                  		funct.vector_compress_start();
+										}
                 }
             }
           } // End for "Overall_Computation_Communication" timer scope 
         }
       {
-        TimerOutput::Scope t(timer, "vector_compress_finish");
-        funct.vector_compress_finish();
+				if (communication)
+					{
+        		TimerOutput::Scope t(timer, "vector_compress_finish");
+        		funct.vector_compress_finish();
+					}
       }
 
       if (scheme != none)
