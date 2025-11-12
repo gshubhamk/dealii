@@ -88,12 +88,12 @@ namespace Euler_DG
   constexpr double final_time  = testcase == 0 ? 50 : 2.0;
   constexpr double output_tick = testcase == 0 ? 1 : 0.05;
 
-  double c = 0.02;
-  const double courant_number = c / std::pow(fe_degree, 1.5);     // edit by VD & SKG
+  double cfl = 0.02;
+  const double courant_number = cfl / std::pow(fe_degree, 1.5);     // edit by VD & SKG
 
   //************************************* Changes for CAA: edit by VD & SKG starts ****************************
   
-  int L = 1;
+  int L = 9;
   bool AT_flux_flag = true;
   bool communication = true;
 
@@ -104,18 +104,91 @@ namespace Euler_DG
   int face_part_1_end;
 
   int PE_boundary_indicator = 0;      // 1 for PE boundaries; initially set to zero
-
-  std::vector<std::vector<std::vector<dealii::Tensor<1, dimension+2, dealii::VectorizedArray<double> >>>> flux_tensor;
-  unsigned int stage = 0;
-
-  int previous_flux_index = 0;
-  int face_index = 0;
-  int node_index = 0;
+  double previous_comm_timestep = 0.0;
 
   int flux_index = 0;
 
   std::vector<double> c_at;
-  std::vector<double> previous_flux_time_step(fe_degree+1);
+
+  // --- SKG-new Compact PE-only flux history in a Structure-of-Arrays layout ---
+  struct FluxHistory
+  {
+    static constexpr unsigned int MAX_ORDER = 4; // enough for fe_degree <= 3
+
+    unsigned int order = 0;     // = fe_degree + 1
+    unsigned int n_q_face = 0;  // = (n_q_points_1d)^(dim-1)
+    unsigned int n_pe_faces = 0;
+
+    // comp[k][c] is a flat vector of length n_pe_faces * n_q_face
+    std::array<std::array<std::vector<VectorizedArrayType>, dimension+2>, MAX_ORDER> comp;
+
+    void configure(unsigned int order_of_accuracy, unsigned int n_q_per_face)
+    {
+      AssertThrow(order_of_accuracy <= MAX_ORDER, ExcNotImplemented());
+      order = order_of_accuracy;
+      n_q_face = n_q_per_face;
+      n_pe_faces = 0;
+      for (unsigned int k=0; k<MAX_ORDER; ++k)
+        for (unsigned int c=0; c<dimension+2; ++c)
+          comp[k][c].clear();
+    }
+
+    inline void ensure_slot_capacity_for_one_pe_face()
+    {
+      if (n_q_face == 0) 
+        return;
+      for (unsigned int k=0; k<order; ++k)
+        for (unsigned int c=0; c<dimension+2; ++c)
+				  {
+					  const std::size_t old_sz = comp[k][c].size();
+        	  comp[k][c].resize(comp[k][c].size() + n_q_face);
+					  for (unsigned int qq = 0; qq < n_q_face; ++qq)
+              comp[k][c][old_sz + qq] = VectorizedArrayType(); // guaranteed zero
+				  }
+      ++n_pe_faces;
+    }
+
+    inline VectorizedArrayType &
+    ref(unsigned int k, unsigned int c, unsigned int pe_face_id, unsigned int q)
+    {
+      return comp[k][c][pe_face_id * n_q_face + q];
+    }
+  };
+
+  // Precomputed AT combination coefficients per stage (degree-dependent)
+  struct AtCoeffs 
+  {
+    unsigned int order = 0;
+    double a[4] = {0,0,0,0};
+  };
+
+  inline AtCoeffs make_at_coeffs(unsigned int order, double k)
+  {
+    AtCoeffs cc; cc.order = order;
+    if (order == 2) 
+      { 
+        cc.a[0] = (k+1.0);
+        cc.a[1] = (-k); 
+      }
+    else if (order == 3) 
+      {
+        cc.a[0] = (k*k + 3*k + 2)/2.0;
+        cc.a[1] = (-k*k - 2*k);
+        cc.a[2] = (k*k + k)/2.0;
+      } 
+    else if (order == 4)
+      {
+        cc.a[0] = (k*k*k + 6*k*k + 11*k + 6)/6.0;
+        cc.a[1] = -(k*k*k + 5*k*k + 6*k)/2.0;
+        cc.a[2] = (k*k*k + 4*k*k + 3*k)/2.0;
+        cc.a[3] = -(k*k*k + 3*k*k + 2*k)/6.0;
+      } 
+    else 
+      {
+        Assert(false, ExcNotImplemented());
+      }
+    return cc;
+  }
 
 
   void atflux_get_coefficients(
@@ -232,11 +305,9 @@ namespace Euler_DG
   enum EulerNumericalFlux
   {
     lax_friedrichs_modified,
-    harten_lax_vanleer,
-    AT_flux,                        // edit by VD & SKG
+    harten_lax_vanleer
   };
   EulerNumericalFlux numerical_flux_type = lax_friedrichs_modified;
-
 
 
   template <int dim>
@@ -424,49 +495,6 @@ namespace Euler_DG
                    ((s_pos * (flux_m * normal) - s_neg * (flux_p * normal)) -
                     s_pos * s_neg * (u_m - u_p));
           }
-        case AT_flux:               // edit by VD & SKG
-          {
-          switch (fe_degree)
-            {
-          	  case 1:
-                {
-                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
-
-                  double c1 = k+1;
-                  double c2 = k;
-
-                  return (c1*flux_tensor[1][face_index][node_index] - c2*flux_tensor[0][face_index][node_index]);
-                }
-              case 2:
-                {
-                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
-                  double c1 = (k*k + 3*k + 2)/2;
-                  double c2 = (-k*k-2*k);
-                  double c3 = (k*k + k)/2;
-
-                  return (c1*flux_tensor[2][face_index][node_index] + c2*flux_tensor[1][face_index][node_index] + c3*flux_tensor[0][face_index][node_index]);
-                }
-
-
-              case 3:
-                {
-                  double k  = timestep_number+c_at[stage] - previous_flux_time_step[fe_degree];
-                  double c1 = (k*k*k + 6*k*k + 11*k +6)/6;
-                  double c2 = -1*(k*k*k + 5*k*k + 6*k)/2;
-                  double c3 = (k*k*k + 4*k*k + 3*k)/2;
-                  double c4 = -1*(k*k*k + 3*k*k + 2*k)/6;
-
-                  return (c1*flux_tensor[3][face_index][node_index] + c2*flux_tensor[2][face_index][node_index] + c3*flux_tensor[1][face_index][node_index] + c4*flux_tensor[0][face_index][node_index] );
-                }
-
-              default:
-                {
-                  Assert(false, ExcNotImplemented()); 
-                  return {};
-                }
-             }
-
-          }
 
         default:
           {
@@ -568,7 +596,7 @@ namespace Euler_DG
     void
     initialize_vector(LinearAlgebra::distributed::Vector<Number> &vector) const;
 
-  // private:       // VD & SKG: commented private
+    // private:       // VD & SKG: commented private
     // Instance of SubCommunicatorWrapper containing the sub-communicator, which
     // we need to pass to MatrixFree::reinit() to be able to exploit MPI-3.0
     // shared-memory capabilities:
@@ -584,6 +612,8 @@ namespace Euler_DG
                                    subsonic_outflow_boundaries;
     std::set<types::boundary_id>   wall_boundaries;
     std::unique_ptr<Function<dim>> body_force;
+    // Compact flux history (PE faces only)
+    mutable FluxHistory flux_hist;
   };
 
 
@@ -682,6 +712,12 @@ namespace Euler_DG
 
     data.reinit(
       mapping, dof_handlers, constraints, quadratures, additional_data);
+
+    // Configure flux history: order = fe_degree+1, n_q_face = (n_q_points_1d)^(dim-1)
+    const unsigned int order_of_accuracy = degree + 1;
+    const unsigned int n_q_face = Utilities::pow(n_points_1d, dim-1);
+    flux_hist.configure(order_of_accuracy, n_q_face);
+
   }
 
 
@@ -719,13 +755,27 @@ namespace Euler_DG
       i.second->set_time(current_time);
     for (auto &i : subsonic_outflow_boundaries)
       i.second->set_time(current_time);
-	face_index = 0;
+
+    AtCoeffs atc;
+    const bool at_active = AT_flux_flag && (!communication);
+    if (at_active)
+      {
+        const unsigned int order = degree + 1;
+        const double k = static_cast<double>(timestep_number) + c_at[stage] - previous_comm_timestep; // use the global
+        atc = make_at_coeffs(order, k);
+      }
+
+
     // Run a cell-centric loop by calling MatrixFree::loop_cell_centric() and
     // providing a lambda containing the effects of the cell, face and
     // boundary-face integrals:
     // VD & SKG: loop_cell_centric based on CAA
     {
       TimerOutput::Scope t(timer, "loop_cell_centric_caa"); // SKG-timer: added timer here
+      // Compact, deterministic index for PE faces encountered during this kernel
+      unsigned int pe_cursor = 0;
+
+
     data.template loop_cell_centric_CAA<LinearAlgebra::distributed::Vector<Number>,
                                     LinearAlgebra::distributed::Vector<Number>>(
       [&](const auto &data, auto &dst, const auto &src, const auto cell_range) {
@@ -906,32 +956,86 @@ namespace Euler_DG
                     phi_p.reinit(cell, face);
                     phi_p.gather_evaluate(src, EvaluationFlags::values);
 
-                    // VD & SKG: condition for AT flux and no communication
-                    if((PE_boundary_indicator ==1) && (!communication) && AT_flux_flag)  // need to put communication is not happening flag can take it outside for loop
-                    {
-                      numerical_flux_type = AT_flux;
-                    }
-                    else
-                    {
-                      numerical_flux_type = lax_friedrichs_modified;
-                    }
 
-                    for (const unsigned int q :
-                         phi_m.quadrature_point_indices())
+                    const bool is_pe_face = (PE_boundary_indicator == 1);
+
+                    if (is_pe_face && AT_flux_flag && !communication)
                       {
-                        node_index = q;
-                        const auto numerical_flux =
-                          euler_numerical_flux<dim>(phi_m.get_value(q),
-                                                    phi_p.get_value(q),
-                                                    phi_m.normal_vector(q));
-                        if((PE_boundary_indicator ==1) && (stage==0) && communication && AT_flux_flag)
-                        {
-                          flux_tensor[previous_flux_index][face_index][q] = numerical_flux;
-                        }
-                        phi_m.submit_value(-numerical_flux, q);
+                        if (pe_cursor >= flux_hist.n_pe_faces)
+                          {
+                            // Safety: history not recorded for this face index; fall back to LF
+                            for (const unsigned int q : phi_m.quadrature_point_indices())
+                              {
+                                const auto num_flux =
+                                      euler_numerical_flux<dim>(phi_m.get_value(q),
+                                                                phi_p.get_value(q),
+                                                                phi_m.normal_vector(q));
+                                phi_m.submit_value(-num_flux, q);
+                              }
+                            ++pe_cursor;
+                          }
+                        else
+                          {
+                            // AT recombination using stored history
+                            for (const unsigned int q : phi_m.quadrature_point_indices())
+                              {
+                                Tensor<1, dim+2, VectorizedArrayType> num_flux;
+                                for (unsigned int c=0; c<dim+2; ++c)
+                                  {
+                                    VectorizedArrayType acc = VectorizedArrayType(); // zero
+                                    for (unsigned int k=0; k<atc.order; ++k)
+                                    acc += atc.a[k] * flux_hist.ref(k, c, pe_cursor, q);
+                                    num_flux[c] = acc;
+                                  }
+                                phi_m.submit_value(-num_flux, q);
+                              }
+                            ++pe_cursor;
+                          }
                       }
-		    if ( (PE_boundary_indicator ==1) && AT_flux_flag)
-			face_index++;
+
+                      else
+                        {
+                          // Regular LF computation (and optionally store history on comm+stage0)
+                          for (const unsigned int q : phi_m.quadrature_point_indices())
+                            {
+                              const auto num_flux =
+                              euler_numerical_flux<dim>(phi_m.get_value(q),
+                                                        phi_p.get_value(q),
+                                                        phi_m.normal_vector(q));
+
+	                            if (is_pe_face && AT_flux_flag && communication && stage == 0)
+                                {
+                                  // First time we touch this PE face (q==0):
+                                  if (q == 0)
+                                    {
+                                      // If this face is new (from a previous timestep), grow the history buffer
+                                      if (pe_cursor >= flux_hist.n_pe_faces)
+                                      flux_hist.ensure_slot_capacity_for_one_pe_face();
+
+                                      // Now, rotate the history for *this specific face*
+                                      // Note: pe_cursor is the correct index for this face
+                                      for (unsigned int k = flux_hist.order - 1; k > 0; --k)
+                                        for (unsigned int c = 0; c < dim + 2; ++c)
+                                          for (unsigned int qq = 0; qq < flux_hist.n_q_face; ++qq)
+                                            flux_hist.ref(k, c, pe_cursor, qq) = flux_hist.ref(k - 1, c, pe_cursor, qq);
+                                    }
+
+                                  // Store current flux at k=0, using pe_cursor as the index
+                                  for (unsigned int c = 0; c < dim + 2; ++c)
+                                  flux_hist.ref(0, c, pe_cursor, q) = num_flux[c];
+                                }
+
+                              phi_m.submit_value(-num_flux, q);
+                            } // end q-loop
+
+                          // This must be *outside* the else block, so it increments
+                          // for all PE faces in all cases.
+                          if (is_pe_face)
+                            {
+                              ++pe_cursor;
+                            }
+                        }
+
                   }
                 else
                   {
@@ -1669,7 +1773,7 @@ namespace Euler_DG
               << std::setw(7) << std::fixed << std::setprecision(1) << std_dev_tot << std::endl;
         pcout << "----------------------------------------------------------------------------------" << std::endl;
       }
-  } // SKG: end of the new code
+    } // SKG: end of the new code
 
     euler_operator.reinit(mapping, dof_handler);
     euler_operator.initialize_vector(solution);
@@ -1829,25 +1933,13 @@ namespace Euler_DG
         std::cout<<"AT flux, ";
       else
         std::cout<<"Lax-Friedrichs flux, ";
-      std::cout<<"Degree of polynomial is "<<fe_degree<<", G is "<<n_global_refinements<<", CFL is "<<c<<", maximum allowable delay is "<<L+1<<".\n";
+      std::cout<<"Degree of polynomial is "<<fe_degree<<", G is "<<n_global_refinements<<", CFL is "<<cfl<<", maximum allowable delay is "<<L+1<<".\n";
     }
 
-    //******************************************** VD & SKG: Number of faces in part 1 ***************************************
-    int number_of_faces = GeometryInfo<dim>::faces_per_cell * triangulation.n_active_cells();
 
     //******************************************* VD & SKG: Order of accuracy ****************************************
     unsigned int order_of_accuracy = fe_degree+1;
-    number_of_stages = c_at.size();
-    for (unsigned int i=0; i<order_of_accuracy; i++)
-    {      
-        std::vector<std::vector<dealii::Tensor<1,dimension+2, dealii::VectorizedArray<double> >>> faces_for_tensor;        
-        for (int j=0; j<number_of_faces; j++) 
-        {            
-            std::vector<dealii::Tensor<1,dimension+2, dealii::VectorizedArray<double> >> nodes_for_tensor(Utilities::pow(n_q_points_1d, dim-1));   
-            faces_for_tensor.push_back(nodes_for_tensor);        
-        }        
-        flux_tensor.push_back(faces_for_tensor);    
-    }
+
     this->euler_operator.data.L  = L;
 
     output_results(0);
@@ -1860,23 +1952,29 @@ namespace Euler_DG
       {
         ++timestep_number;
 				++time_step_counter;
-        if((timestep_number%(order_of_accuracy+L)<(order_of_accuracy)))//|(timestep_number<((order_of_accuracy+L+1)))
-        {
-          communication = true;
-          this->euler_operator.data.communication = communication;
-          previous_flux_index = timestep_number%(order_of_accuracy+L);
-          previous_flux_time_step[previous_flux_index] = timestep_number;
-        }
+				if (timestep_number <= order_of_accuracy || (timestep_number%(order_of_accuracy+L)<(order_of_accuracy)))
+          {
+            communication = true;
+            this->euler_operator.data.communication = communication;
+            // record the last comm step for AT recombination
+            previous_comm_timestep = static_cast<double>(timestep_number);
+          }
+        
         else
-        {
-          communication = false;
-          this->euler_operator.data.communication = communication;
-        }
+          {
+            communication = false;
+            this->euler_operator.data.communication = communication;
+          }
         if (timestep_number % 50 == 0)
-          time_step =
+          {
+            solution.update_ghost_values();
+            solution.compress(VectorOperation::insert);
+            time_step =
             courant_number * integrator.n_stages() /
             Utilities::truncate_to_n_digits(
-              euler_operator.compute_cell_transport_speed(solution), 3);
+            euler_operator.compute_cell_transport_speed(solution), 3);
+          }
+
 
         {
           TimerOutput::Scope t(timer, "rk time stepping total");
@@ -1908,18 +2006,25 @@ namespace Euler_DG
               {
                 communication = true;
                 this->euler_operator.data.communication = communication;
+								previous_comm_timestep = static_cast<double>(timestep_number);
               }
             else
               {
                 communication = false;
                 this->euler_operator.data.communication = communication;
+							//	previous_comm_timestep = static_cast<double>(timestep_number);
               }
 
-            if (timestep_number % 50 == 0)            // edit changed 5 to 50: edit by vd & skg
-              time_step =
+            if (timestep_number % 50 == 0)
+              {
+                solution.update_ghost_values();
+                solution.compress(VectorOperation::insert);
+                time_step =
                 courant_number * integrator.n_stages() /
                 Utilities::truncate_to_n_digits(
-                  euler_operator.compute_cell_transport_speed(solution), 3);
+                euler_operator.compute_cell_transport_speed(solution), 3);
+              }
+
 
             {
               TimerOutput::Scope t(timer, "rk time stepping total");
