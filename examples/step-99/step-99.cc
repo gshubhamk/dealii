@@ -97,16 +97,10 @@ namespace Euler_DG
   bool AT_flux_flag = true;
   bool communication = true;
 
-  int number_of_stages = -1;
   unsigned int timestep_number = -1;
-
-  unsigned int face_part_1_start;
-  int face_part_1_end;
 
   int PE_boundary_indicator = 0;      // 1 for PE boundaries; initially set to zero
   double previous_comm_timestep = 0.0;
-
-  int flux_index = 0;
 
   std::vector<double> c_at;
 
@@ -190,15 +184,6 @@ namespace Euler_DG
     return cc;
   }
 
-
-  void atflux_get_coefficients(
-    std::vector<double> &c,
-    std::vector<double> &ci) 
-  {
-    c.resize(ci.size());
-    c = ci;
-  }
-
    //************************************* Changes for CAA: edit by VD & SKG ends ****************************
 
   // Specify max number of time steps useful for performance studies.
@@ -252,7 +237,7 @@ namespace Euler_DG
                           rk_integrator(lsrk);
       std::vector<double> ci; // used for AT fluxes coefficients
       rk_integrator.get_coefficients(ai, bi, ci);
-      atflux_get_coefficients(c_at, ci);
+      c_at = ci;
     }
 
     unsigned int n_stages() const
@@ -276,7 +261,6 @@ namespace Euler_DG
       double sum_previous_bi = 0;
       for (unsigned int stage = 0; stage < bi.size(); ++stage)
         {
-          flux_index=0;
           const double c_i = stage == 0 ? 0 : sum_previous_bi + ai[stage - 1];
 
           pde_operator.perform_stage(stage,
@@ -1917,12 +1901,13 @@ namespace Euler_DG
     min_vertex_distance =
       Utilities::MPI::min(min_vertex_distance, MPI_COMM_WORLD);
 
+    const double initial_transport_speed = euler_operator.compute_cell_transport_speed(solution);
     time_step = courant_number * integrator.n_stages() /
-                euler_operator.compute_cell_transport_speed(solution);
+                initial_transport_speed;
     pcout << "Time step size: " << time_step
           << ", minimal h: " << min_vertex_distance
           << ", initial transport scaling: "
-          << 1. / euler_operator.compute_cell_transport_speed(solution)
+          << 1. / initial_transport_speed
           << std::endl
           << std::endl;
 
@@ -1944,7 +1929,6 @@ namespace Euler_DG
 
     output_results(0);
 
-    //unsigned int timestep_number = 0;      // VD & SKG: commented
 		unsigned int time_step_counter = 0;
     if(AT_flux_flag)
     {
@@ -2012,7 +1996,6 @@ namespace Euler_DG
               {
                 communication = false;
                 this->euler_operator.data.communication = communication;
-							//	previous_comm_timestep = static_cast<double>(timestep_number);
               }
 
             if (timestep_number % 50 == 0)
