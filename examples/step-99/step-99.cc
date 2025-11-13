@@ -1797,7 +1797,7 @@ namespace Euler_DG
     const std::string quantity_name = testcase == 0 ? "error" : "norm";
 
     pcout << "Time:" << std::setw(8) << std::setprecision(3) << time
-          << ", dt: " << std::setw(8) << std::setprecision(2) << time_step
+          << ", dt: " << std::setw(8) << std::setprecision(4) << time_step
           << ", " << quantity_name << " rho: " << std::setprecision(4)
           << std::setw(10) << errors[0] << ", rho * u: " << std::setprecision(4)
           << std::setw(10) << errors[1] << ", energy:" << std::setprecision(4)
