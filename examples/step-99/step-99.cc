@@ -93,7 +93,7 @@ namespace Euler_DG
 
   //************************************* Changes for CAA: edit by VD & SKG starts ****************************
   
-  int L = 9;
+  int L = 9;  // Number of times (time steps) the communication is skipped; maximum allowable delay = L+1.
   bool AT_flux_flag = true;
   bool communication = true;
 
@@ -104,7 +104,13 @@ namespace Euler_DG
 
   std::vector<double> c_at;
 
-  // --- SKG-new Compact PE-only flux history in a Structure-of-Arrays layout ---
+  // --- SKG-new Compact PE-only flux history in a Structure-of-Arrays layout --
+  // Compact per-PE-face flux history (Structure-of-Arrays):
+  // - comp[k][c] is a flat vector with entries ordered as
+  //     [ face0_q0, face0_q1, ..., face1_q0, face1_q1, ... ]
+  //   so index = pe_face_id * n_q_face + q
+  // - k is the time-history slot (0 = newest), c is component.
+  // - Storage grows lazily with ensure_slot_capacity_for_one_pe_face().-
   struct FluxHistory
   {
     static constexpr unsigned int MAX_ORDER = 4; // enough for fe_degree <= 3
@@ -135,9 +141,11 @@ namespace Euler_DG
         for (unsigned int c=0; c<dimension+2; ++c)
 				  {
 					  const std::size_t old_sz = comp[k][c].size();
+            // append n_q_face entries for this new PE face
         	  comp[k][c].resize(comp[k][c].size() + n_q_face);
+            // initialize newly appended entries to zero (VectorizedArrayType() is zero)
 					  for (unsigned int qq = 0; qq < n_q_face; ++qq)
-              comp[k][c][old_sz + qq] = VectorizedArrayType(); // guaranteed zero
+              comp[k][c][old_sz + qq] = VectorizedArrayType(); // zero
 				  }
       ++n_pe_faces;
     }
@@ -158,30 +166,31 @@ namespace Euler_DG
 
   inline AtCoeffs make_at_coeffs(unsigned int order, double k)
   {
-    AtCoeffs cc; cc.order = order;
+    AtCoeffs coeffs; 
+    coeffs.order = order;
     if (order == 2) 
       { 
-        cc.a[0] = (k+1.0);
-        cc.a[1] = (-k); 
+        coeffs.a[0] = (k+1.0);
+        coeffs.a[1] = (-k); 
       }
     else if (order == 3) 
       {
-        cc.a[0] = (k*k + 3*k + 2)/2.0;
-        cc.a[1] = (-k*k - 2*k);
-        cc.a[2] = (k*k + k)/2.0;
+        coeffs.a[0] = (k*k + 3*k + 2)/2.0;
+        coeffs.a[1] = (-k*k - 2*k);
+        coeffs.a[2] = (k*k + k)/2.0;
       } 
     else if (order == 4)
       {
-        cc.a[0] = (k*k*k + 6*k*k + 11*k + 6)/6.0;
-        cc.a[1] = -(k*k*k + 5*k*k + 6*k)/2.0;
-        cc.a[2] = (k*k*k + 4*k*k + 3*k)/2.0;
-        cc.a[3] = -(k*k*k + 3*k*k + 2*k)/6.0;
+        coeffs.a[0] = (k*k*k + 6*k*k + 11*k + 6)/6.0;
+        coeffs.a[1] = -(k*k*k + 5*k*k + 6*k)/2.0;
+        coeffs.a[2] = (k*k*k + 4*k*k + 3*k)/2.0;
+        coeffs.a[3] = -(k*k*k + 3*k*k + 2*k)/6.0;
       } 
     else 
       {
         Assert(false, ExcNotImplemented());
       }
-    return cc;
+    return coeffs;
   }
 
    //************************************* Changes for CAA: edit by VD & SKG ends ****************************
@@ -740,13 +749,13 @@ namespace Euler_DG
     for (auto &i : subsonic_outflow_boundaries)
       i.second->set_time(current_time);
 
-    AtCoeffs atc;
+    AtCoeffs at_coeff;
     const bool at_active = AT_flux_flag && (!communication);
     if (at_active)
       {
         const unsigned int order = degree + 1;
         const double k = static_cast<double>(timestep_number) + c_at[stage] - previous_comm_timestep; // use the global
-        atc = make_at_coeffs(order, k);
+        at_coeff = make_at_coeffs(order, k); // make_at_coeffs returns array of 'a' coefficients
       }
 
 
@@ -931,6 +940,11 @@ namespace Euler_DG
 
                 // Check if the face is an internal or a boundary face and
                 // select a different code path based on this information:
+                // --- AT history handling (compact, per-PE-face):
+                // - On comm+stage0: rotate per-face history slots and store current LF flux in k=0.
+                // - On AT (no communication): recombine stored fluxes with AT coefficients:
+                //     num_flux = sum_{k=0..order-1} a[k] * flux_hist.ref(k,c,pe_face,q)
+                // - Uses pe_cursor as deterministic per-kernel face index into the compact array.
                 if (boundary_id == numbers::internal_face_boundary_id)
                   {
                     // Process and internal face. The following lines of code
@@ -966,10 +980,10 @@ namespace Euler_DG
                                 Tensor<1, dim+2, VectorizedArrayType> num_flux;
                                 for (unsigned int c=0; c<dim+2; ++c)
                                   {
-                                    VectorizedArrayType acc = VectorizedArrayType(); // zero
-                                    for (unsigned int k=0; k<atc.order; ++k)
-                                    acc += atc.a[k] * flux_hist.ref(k, c, pe_cursor, q);
-                                    num_flux[c] = acc;
+                                    VectorizedArrayType at_flux_temp = VectorizedArrayType(); // zero
+                                    for (unsigned int k=0; k<at_coeff.order; ++k)
+                                      at_flux_temp += at_coeff.a[k] * flux_hist.ref(k, c, pe_cursor, q);
+                                    num_flux[c] = at_flux_temp;
                                   }
                                 phi_m.submit_value(-num_flux, q);
                               }
@@ -994,19 +1008,20 @@ namespace Euler_DG
                                     {
                                       // If this face is new (from a previous timestep), grow the history buffer
                                       if (pe_cursor >= flux_hist.n_pe_faces)
-                                      flux_hist.ensure_slot_capacity_for_one_pe_face();
+                                        flux_hist.ensure_slot_capacity_for_one_pe_face();
 
                                       // Now, rotate the history for *this specific face*
                                       // Note: pe_cursor is the correct index for this face
+                                      // rotation: k <- k-1 (move older history up one slot)
                                       for (unsigned int k = flux_hist.order - 1; k > 0; --k)
                                         for (unsigned int c = 0; c < dim + 2; ++c)
                                           for (unsigned int qq = 0; qq < flux_hist.n_q_face; ++qq)
                                             flux_hist.ref(k, c, pe_cursor, qq) = flux_hist.ref(k - 1, c, pe_cursor, qq);
                                     }
 
-                                  // Store current flux at k=0, using pe_cursor as the index
+                                  // Store current flux at k=0 for this face at quadrature point q, using pe_cursor as the index
                                   for (unsigned int c = 0; c < dim + 2; ++c)
-                                  flux_hist.ref(0, c, pe_cursor, q) = num_flux[c];
+                                    flux_hist.ref(0, c, pe_cursor, q) = num_flux[c];
                                 }
 
                               phi_m.submit_value(-num_flux, q);
