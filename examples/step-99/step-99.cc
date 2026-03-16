@@ -1484,10 +1484,14 @@ namespace Euler_DG
     Assert(computed_quantities.size() == n_evaluation_points,
            ExcInternalError());
     Assert(inputs.solution_values[0].size() == dim + 2, ExcInternalError());
-    Assert(computed_quantities[0].size() ==
-             dim + 2 + (do_schlieren_plot == true ? 1 : 0),
-           ExcInternalError());
+   // Assert(computed_quantities[0].size() ==
+     //        dim + 2 + (do_schlieren_plot == true ? 1 : 0),
+       //    ExcInternalError());
+ Assert(computed_quantities[0].size() ==
+       dim + 2 + dim + 1,
+       ExcInternalError());
 
+/*
     for (unsigned int p = 0; p < n_evaluation_points; ++p)
       {
         Tensor<1, dim + 2> solution;
@@ -1507,6 +1511,46 @@ namespace Euler_DG
           computed_quantities[p](dim + 2) =
             inputs.solution_gradients[p][0] * inputs.solution_gradients[p][0];
       }
+*/
+
+for (unsigned int p = 0; p < n_evaluation_points; ++p)
+{
+  Tensor<1, dim + 2> solution;
+  for (unsigned int d = 0; d < dim + 2; ++d)
+    solution[d] = inputs.solution_values[p](d);
+
+  const double density = solution[0];
+  const Tensor<1, dim> velocity = euler_velocity<dim>(solution);
+  const double pressure = euler_pressure<dim>(solution);
+
+  // velocity
+  for (unsigned int d = 0; d < dim; ++d)
+    computed_quantities[p](d) = velocity[d];
+
+  // pressure
+  computed_quantities[p](dim) = pressure;
+
+  // speed of sound
+  computed_quantities[p](dim+1) =
+      std::sqrt(gamma * pressure / density);
+
+  // density gradient
+  const auto &grad = inputs.solution_gradients[p][0];
+
+  for (unsigned int d = 0; d < dim; ++d)
+      computed_quantities[p](dim+2+d) = grad[d];
+
+// Gradient of momentum components
+for (unsigned int d = 0; d < dim; ++d)
+  computed_quantities[p](dim + 2 + d) =
+      inputs.solution_gradients[p][1 + d][d];
+
+// Gradient of energy
+computed_quantities[p](dim + 2 + dim) =
+      inputs.solution_gradients[p][dim + 1][0];
+
+}
+
   }
 
 
@@ -1519,6 +1563,16 @@ namespace Euler_DG
       names.emplace_back("velocity");
     names.emplace_back("pressure");
     names.emplace_back("speed_of_sound");
+
+for (unsigned int d = 0; d < dim; ++d)
+  names.emplace_back("grad_density");
+
+// momentum gradients
+for (unsigned int d = 0; d < dim; ++d)
+  names.emplace_back("grad_momentum");
+
+// energy gradient
+names.emplace_back("grad_energy");
 
     if (do_schlieren_plot == true)
       names.emplace_back("schlieren_plot");
@@ -1539,6 +1593,16 @@ namespace Euler_DG
         DataComponentInterpretation::component_is_part_of_vector);
     interpretation.push_back(DataComponentInterpretation::component_is_scalar);
     interpretation.push_back(DataComponentInterpretation::component_is_scalar);
+for (unsigned int d = 0; d < dim; ++d)
+  interpretation.push_back(
+    DataComponentInterpretation::component_is_part_of_vector);
+
+for (unsigned int d = 0; d < dim; ++d)
+  interpretation.push_back(
+    DataComponentInterpretation::component_is_part_of_vector);
+
+interpretation.push_back(
+  DataComponentInterpretation::component_is_scalar);
 
     if (do_schlieren_plot == true)
       interpretation.push_back(
@@ -1555,7 +1619,7 @@ namespace Euler_DG
     if (do_schlieren_plot == true)
       return update_values | update_gradients;
     else
-      return update_values;
+      return update_values | update_gradients;
   }
 
 
