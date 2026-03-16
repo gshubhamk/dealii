@@ -60,9 +60,9 @@ namespace Euler_DG
   using namespace dealii;
 
   // The same input parameters as in step-67:
-  constexpr unsigned int testcase             = 1;
-  constexpr unsigned int dimension            = 3;
-  constexpr unsigned int n_global_refinements = 3;
+  constexpr unsigned int testcase             = 0;
+  constexpr unsigned int dimension            = 2;
+  constexpr unsigned int n_global_refinements = 4;
   constexpr unsigned int fe_degree            = 2;
   constexpr unsigned int n_q_points_1d        = fe_degree + 2;
 
@@ -85,16 +85,17 @@ namespace Euler_DG
 
   // The following parameters have not changed:
   constexpr double gamma       = 1.4;
-  constexpr double final_time  = testcase == 0 ? 50 : 2.0;
-  constexpr double output_tick = testcase == 0 ? 1 : 0.05;
+  constexpr double final_time  = testcase == 0 ? 4.0 : 2.0;
+  constexpr double output_tick = testcase == 0 ? 0.2 : 0.1;
 
   double cfl = 0.02;
   const double courant_number = cfl / std::pow(fe_degree, 1.5);     // edit by VD & SKG
 
   //************************************* Changes for CAA: edit by VD & SKG starts ****************************
   
-  int L = 9;  // Number of times (time steps) the communication is skipped; maximum allowable delay = L+1.
-  bool AT_flux_flag = true;
+  int L = 3;  // Number of times (time steps) the communication is skipped; maximum allowable delay = L+1.
+  bool caa = true;
+  bool AT_flux_flag = false;
   bool communication = true;
 
   unsigned int timestep_number = -1;
@@ -196,7 +197,7 @@ namespace Euler_DG
    //************************************* Changes for CAA: edit by VD & SKG ends ****************************
 
   // Specify max number of time steps useful for performance studies.
-  constexpr unsigned int max_time_steps = 1000; // numbers::invalid_unsigned_int;
+  constexpr unsigned int max_time_steps = numbers::invalid_unsigned_int;
 
   // Runge-Kutta-related functions copied from step-67 and slightly modified
   // with the purpose to minimize global vector access:
@@ -757,6 +758,11 @@ namespace Euler_DG
         const double k = static_cast<double>(timestep_number) + c_at[stage] - previous_comm_timestep; // use the global
         at_coeff = make_at_coeffs(order, k); // make_at_coeffs returns array of 'a' coefficients
       }
+	else
+	{
+		const unsigned int order = degree+1;
+		at_coeff = make_at_coeffs(order, 0);
+	}
 
 
     // Run a cell-centric loop by calling MatrixFree::loop_cell_centric() and
@@ -957,7 +963,7 @@ namespace Euler_DG
 
                     const bool is_pe_face = (PE_boundary_indicator == 1);
 
-                    if (is_pe_face && AT_flux_flag && !communication)
+                    if (is_pe_face && !communication)
                       {
                         if (pe_cursor >= flux_hist.n_pe_faces)
                           {
@@ -1001,7 +1007,7 @@ namespace Euler_DG
                                                         phi_p.get_value(q),
                                                         phi_m.normal_vector(q));
 
-	                            if (is_pe_face && AT_flux_flag && communication && stage == 0)
+	                            if (is_pe_face && caa && communication && stage == 0)
                                 {
                                   // First time we touch this PE face (q==0):
                                   if (q == 0)
@@ -1796,7 +1802,7 @@ namespace Euler_DG
       euler_operator.compute_errors(ExactSolution<dim>(time), solution);
     const std::string quantity_name = testcase == 0 ? "error" : "norm";
 
-    pcout << "Time:" << std::setw(8) << std::setprecision(3) << time
+    pcout << std::scientific << "Time:" << std::setw(8) << std::setprecision(3) << time
           << ", dt: " << std::setw(8) << std::setprecision(4) << time_step
           << ", " << quantity_name << " rho: " << std::setprecision(4)
           << std::setw(10) << errors[0] << ", rho * u: " << std::setprecision(4)
@@ -1919,7 +1925,7 @@ namespace Euler_DG
     const double initial_transport_speed = euler_operator.compute_cell_transport_speed(solution);
     time_step = courant_number * integrator.n_stages() /
                 initial_transport_speed;
-    pcout << "Time step size: " << time_step
+    pcout << std::scientific << "Time step size: " << time_step
           << ", minimal h: " << min_vertex_distance
           << ", initial transport scaling: "
           << 1. / initial_transport_speed
@@ -1933,7 +1939,7 @@ namespace Euler_DG
         std::cout<<"AT flux, ";
       else
         std::cout<<"Lax-Friedrichs flux, ";
-      std::cout<<"Degree of polynomial is "<<fe_degree<<", G is "<<n_global_refinements<<", CFL is "<<cfl<<", maximum allowable delay is "<<L+1<<".\n";
+      std::cout<< std:: scientific << "Degree of polynomial is "<<fe_degree<<", G is "<<n_global_refinements<<", CFL is "<<cfl<<", maximum allowable delay is "<<L+1<<".\n";
     }
 
 
