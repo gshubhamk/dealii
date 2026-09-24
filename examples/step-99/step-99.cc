@@ -95,7 +95,7 @@ namespace Euler_DG
   
   int L = 3;  // Number of times (time steps) the communication is skipped; maximum allowable delay = L+1.
   bool caa = true;
-  bool AT_flux_flag = false;
+  bool AT_flux_flag = true;
   bool communication = true;
 
   unsigned int timestep_number = -1;
