@@ -671,8 +671,10 @@ namespace Utilities
 
     private:
       /**
-       * Initialize import_indices_plain_dev from import_indices_data. This
-       * function is only used when using @ref GlossDevice "device"-aware MPI.
+       * Initialize import_indices_plain_dev, import_entries_dev,
+       * import_entry_offsets_dev, and import_entry_positions_dev from
+       * import_indices_data. This function is only used when using
+       * @ref GlossDevice "device"-aware MPI.
        */
       void
       initialize_import_indices_plain_dev() const;
@@ -732,6 +734,34 @@ namespace Utilities
       // export_to_ghosted_array_start().
       mutable Kokkos::View<unsigned int *, MemorySpace::Default::kokkos_space>
         import_indices_plain_dev;
+
+      /**
+       * The distinct (local) indices in import_indices_plain_dev, sorted. An
+       * index appears more than once in import_indices_plain_dev if it is a
+       * ghost on several processors. Together with import_entry_offsets_dev
+       * and import_entry_positions_dev, this allows to apply the data
+       * imported in compress() with a single kernel, in the same order as for
+       * the host. These variables are only used when using
+       * @ref GlossDevice "device"-aware MPI.
+       */
+      mutable Kokkos::View<unsigned int *, MemorySpace::Default::kokkos_space>
+        import_entries_dev;
+
+      /**
+       * For each entry of import_entries_dev, the range
+       * [import_entry_offsets_dev[i], import_entry_offsets_dev[i+1]) in
+       * import_entry_positions_dev.
+       */
+      mutable Kokkos::View<unsigned int *, MemorySpace::Default::kokkos_space>
+        import_entry_offsets_dev;
+
+      /**
+       * For each entry of import_entries_dev, the positions in
+       * import_indices_plain_dev (and thus in the imported data) that refer
+       * to it, in increasing order.
+       */
+      mutable Kokkos::View<unsigned int *, MemorySpace::Default::kokkos_space>
+        import_entry_positions_dev;
 
       /**
        * A variable caching the number of ghost indices. It would be expensive
