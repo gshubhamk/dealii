@@ -1,0 +1,8 @@
+Improved: With device-aware MPI, Utilities::MPI::Partitioner now packs the
+data for all import targets in export_to_ghosted_array_start() with a single
+kernel and a single fence instead of one kernel and one fence per target. This
+reduces the latency of
+LinearAlgebra::distributed::Vector::update_ghost_values() for vectors in
+MemorySpace::Default.
+<br>
+(Shubham Goswami, 2026/10/26)

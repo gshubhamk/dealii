@@ -723,13 +723,14 @@ namespace Utilities
       /**
        * The set of (local) indices that we are importing during compress(),
        * i.e., others' ghosts that belong to the local range. The data stored is
-       * the same as in import_indices_data but the data is expanded in plain
-       * arrays. This variable is only used when using @ref GlossDevice "device"-aware MPI.
+       * the same as in import_indices_data but the data is expanded in a
+       * single plain array, with the indices of all import targets stored
+       * one after the other in the order of import_targets_data. This
+       * variable is only used when using @ref GlossDevice "device"-aware MPI.
        */
       // The variable is mutable to enable lazy initialization in
       // export_to_ghosted_array_start().
-      mutable std::vector<
-        Kokkos::View<unsigned int *, MemorySpace::Default::kokkos_space>>
+      mutable Kokkos::View<unsigned int *, MemorySpace::Default::kokkos_space>
         import_indices_plain_dev;
 
       /**
